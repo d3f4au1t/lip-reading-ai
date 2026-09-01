@@ -70,6 +70,11 @@ class CaptionHistory:
     def contains(self, entry_id: int) -> bool:
         return any(entry.entry_id == entry_id for entry in self.entries)
 
+    def display_rows(self) -> tuple[CaptionEntry | None, ...]:
+        """Bottom-align entries so each new caption visibly shifts older rows up."""
+        empty_rows = (None,) * (self.limit - len(self.entries))
+        return empty_rows + tuple(self.entries)
+
 
 def _processing_placeholder(started_at: float, now: float) -> str:
     phase = int(max(0.0, now - started_at) * 2) % 3
@@ -328,15 +333,14 @@ def main(argv: list[str] | None = None) -> int:
             row_area_bottom = height - 34
             row_height = max(38, (row_area_bottom - row_area_top) // 3)
             now = time.monotonic()
-            for row_index in range(3):
+            for row_index, entry in enumerate(caption_history.display_rows()):
                 row_top = row_area_top + row_index * row_height
                 baseline = row_top + row_height // 2 + 8
-                if row_index >= len(caption_history.entries):
+                if entry is None:
                     _draw_text(
                         display, "—", (22, baseline), 0.55, (105, 105, 105), 1
                     )
                 else:
-                    entry = caption_history.entries[row_index]
                     if entry.pending:
                         placeholder = _processing_placeholder(entry.started_at, now)
                         _draw_text(
@@ -366,7 +370,7 @@ def main(argv: list[str] | None = None) -> int:
                                 (255, 255, 255),
                                 2,
                             )
-                if row_index < 2:
+                if row_index < caption_history.limit - 1:
                     divider_y = row_area_top + (row_index + 1) * row_height
                     cv2.line(
                         display,

@@ -73,6 +73,37 @@ def test_caption_history_scrolls_when_fourth_placeholder_starts() -> None:
     assert [entry.pending for entry in history.entries] == [False, True, True]
 
 
+def test_caption_rows_are_bottom_anchored_and_shift_up_each_time() -> None:
+    history = CaptionHistory(limit=3)
+    first = history.start(started_at=1.0)
+    assert [entry.entry_id if entry else None for entry in history.display_rows()] == [
+        None,
+        None,
+        first,
+    ]
+
+    second = history.start(started_at=2.0)
+    assert [entry.entry_id if entry else None for entry in history.display_rows()] == [
+        None,
+        first,
+        second,
+    ]
+
+    third = history.start(started_at=3.0)
+    assert [entry.entry_id if entry else None for entry in history.display_rows()] == [
+        first,
+        second,
+        third,
+    ]
+
+    fourth = history.start(started_at=4.0)
+    assert [entry.entry_id if entry else None for entry in history.display_rows()] == [
+        second,
+        third,
+        fourth,
+    ]
+
+
 def test_caption_result_replaces_its_placeholder() -> None:
     history = CaptionHistory(limit=3)
     entry_id = history.start(started_at=1.0)

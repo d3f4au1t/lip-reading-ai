@@ -150,9 +150,10 @@ Other options include `--window-seconds 6`, `--beam-size 1`, and the advanced
 are not written to disk. While the face is idle, the UI waits without creating a row or
 asking the decoder for text. Sustained normalized lip movement starts a speech window
 with `.`, `..`, and `...`; a short pause or the maximum window length closes it, and the
-decoded text replaces that placeholder. The UI keeps three windows on screen. Starting
-a fourth shifts the existing rows up and opens the bottom row. Per-word estimates remain
-colored from red (low), through yellow, to green (high). The UI also shows face/lip
+decoded text replaces that placeholder. The newest placeholder is always on the bottom
+row, and every older caption visibly shifts up one row when the next speech window starts.
+The UI keeps the latest three windows on screen. Per-word estimates remain colored from
+red (low), through yellow, to green (high). The UI also shows face/lip
 activity, processing state, last latency, and a warning that model uncertainty is not
 calibrated. Press `Q` or Escape to quit.
 

@@ -12,6 +12,7 @@ if __package__ in {None, ""}:
 import cv2
 import numpy as np
 
+from app.camera import discover_macos_cameras, open_camera, resolve_camera
 from app.config import DEFAULT_CHECKPOINT, TARGET_FPS
 from app.pipeline import PipelineResult, VisualSpeechPipeline
 
@@ -46,7 +47,14 @@ def _wrap_caption(text: str, max_chars: int = 54) -> list[str]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Short-window visual-only webcam captions")
-    parser.add_argument("--camera", type=int, default=0, help="Camera index")
+    parser.add_argument(
+        "--camera",
+        default="built-in",
+        help="Camera selector: 'built-in' (default) or a numeric index",
+    )
+    parser.add_argument(
+        "--list-cameras", action="store_true", help="List macOS cameras and exit"
+    )
     parser.add_argument("--window-seconds", type=float, default=4.0, help="Frames per recognition window")
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT)
     parser.add_argument("--device", choices=("auto", "mps", "cpu", "cuda"), default="auto")
@@ -56,17 +64,23 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.list_cameras:
+        devices = discover_macos_cameras()
+        if not devices:
+            print("No cameras reported by macOS.")
+            return 0
+        for device in devices:
+            label = "built-in Mac camera" if device.is_builtin_mac_camera else "external/Continuity"
+            print(f"{device.index}: {device.name} ({label})")
+        return 0
     if args.window_seconds < 1.0 or args.window_seconds > 16.0:
         raise ValueError("Window length must be between 1 and 16 seconds.")
 
+    device = resolve_camera(args.camera)
+    print(f"Selected camera {device.index}: {device.name}")
     print("Loading visual speech model...")
     pipeline = VisualSpeechPipeline(args.checkpoint, args.device, args.beam_size)
-    camera = cv2.VideoCapture(args.camera)
-    if not camera.isOpened():
-        raise RuntimeError(
-            f"Could not open camera {args.camera}. Check macOS Camera privacy permission for your terminal."
-        )
-    camera.set(cv2.CAP_PROP_FPS, TARGET_FPS)
+    camera, first_frame = open_camera(device, TARGET_FPS)
 
     face_cascade = cv2.CascadeClassifier(
         cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
@@ -83,9 +97,13 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         while True:
-            ok, frame = camera.read()
-            if not ok:
-                raise RuntimeError("The camera stopped returning frames.")
+            if first_frame is not None:
+                frame = first_frame
+                first_frame = None
+            else:
+                ok, frame = camera.read()
+                if not ok:
+                    raise RuntimeError(f"{device.name} stopped returning frames.")
             frame_number += 1
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             buffered_frames.append(rgb)

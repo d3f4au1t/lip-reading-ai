@@ -136,13 +136,23 @@ Security → Camera**, then run:
 uv run --no-sync python app/webcam.py
 ```
 
-Options include `--camera 1`, `--window-seconds 6`, and `--beam-size 1`. Frames are
-kept in memory only and are not written to disk. The UI shows face visibility, capture
-or processing state, current caption, last latency, and a visible warning that model
+The default `--camera built-in` selector chooses the Mac's FaceTime camera by name and
+excludes iPhone/Continuity Camera devices. To inspect the mapping or override it:
+
+```bash
+uv run --no-sync python app/webcam.py --list-cameras
+uv run --no-sync python app/webcam.py --camera built-in
+uv run --no-sync python app/webcam.py --camera 1  # explicit index, if desired
+```
+
+Other options include `--window-seconds 6` and `--beam-size 1`. Frames are kept in
+memory only and are not written to disk. The UI shows face visibility, capture or
+processing state, current caption, last latency, and a visible warning that model
 uncertainty is not calibrated. Press `Q` or Escape to quit.
 
-This environment denied camera access during verification, so actual camera opening
-could not be confirmed here. The program returned a direct macOS authorization error.
+Hardware verification selected `FaceTime HD Camera` at index 0 and captured a
+1280×720 frame. The iPhone camera remained available only as the explicit index 1
+override.
 
 ## Tests
 
@@ -150,10 +160,10 @@ could not be confirmed here. The program returned a direct macOS authorization e
 uv run --no-sync pytest
 ```
 
-The suite currently contains two frame-resampling/error tests and one real integration
-smoke test. The integration test loads the downloaded checkpoint, preprocesses the
-no-audio MP4, executes inference, and requires a non-empty transcription. It skips only
-when the separately downloaded model or sample is absent.
+The suite currently contains four camera-selection tests, two frame-resampling/error
+tests, and one real integration smoke test. The integration test loads the downloaded
+checkpoint, preprocesses the no-audio MP4, executes inference, and requires a non-empty
+transcription. It skips only when the separately downloaded model or sample is absent.
 
 ## Project layout
 

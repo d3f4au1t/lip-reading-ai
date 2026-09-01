@@ -91,30 +91,68 @@ def _certainty_color(certainty: float) -> tuple[int, int, int]:
     return (0, green, red)
 
 
-def _draw_certainty_line(
+def _draw_word_certainties(
     frame: np.ndarray,
-    text: str,
-    origin: tuple[int, int],
-    scale: float,
+    word_certainties: tuple[WordCertainty, ...],
+    left: int,
+    word_baseline: int,
+    percentage_baseline: int,
+    available_width: int,
+    preferred_word_scale: float = 0.68,
     thickness: int = 2,
 ) -> None:
-    """Draw caption words in white and percentage tokens in certainty colors."""
-    x, y = origin
-    space_width = cv2.getTextSize(
-        " ", cv2.FONT_HERSHEY_SIMPLEX, scale, thickness
-    )[0][0]
-    for token in text.split():
-        color = (255, 255, 255)
-        if token.endswith("%"):
-            try:
-                color = _certainty_color(float(token[:-1]) / 100.0)
-            except ValueError:
-                pass
-        _draw_text(frame, token, (x, y), scale, color, thickness)
-        token_width = cv2.getTextSize(
-            token, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness
-        )[0][0]
-        x += token_width + space_width
+    """Draw large words with smaller, aligned certainty percentages underneath."""
+    if not word_certainties:
+        return
+
+    def measure(
+        word_scale: float,
+    ) -> tuple[float, list[tuple[int, int]], int, int]:
+        percentage_scale = word_scale * 0.52
+        widths: list[tuple[int, int]] = []
+        for item in word_certainties:
+            word_width = cv2.getTextSize(
+                item.word, cv2.FONT_HERSHEY_SIMPLEX, word_scale, thickness
+            )[0][0]
+            percentage_width = cv2.getTextSize(
+                f"{item.certainty:.0%}",
+                cv2.FONT_HERSHEY_SIMPLEX,
+                percentage_scale,
+                1,
+            )[0][0]
+            widths.append((word_width, percentage_width))
+        gap = max(5, round(12 * word_scale / preferred_word_scale))
+        total_width = sum(max(pair) for pair in widths) + gap * (len(widths) - 1)
+        return percentage_scale, widths, gap, total_width
+
+    word_scale = preferred_word_scale
+    percentage_scale, widths, gap, total_width = measure(word_scale)
+    if total_width > available_width:
+        word_scale *= available_width / total_width
+        percentage_scale, widths, gap, total_width = measure(word_scale)
+
+    x = left + max(0, (available_width - total_width) // 2)
+    for item, (word_width, percentage_width) in zip(word_certainties, widths):
+        column_width = max(word_width, percentage_width)
+        word_x = x + (column_width - word_width) // 2
+        percentage_x = x + (column_width - percentage_width) // 2
+        _draw_text(
+            frame,
+            item.word,
+            (word_x, word_baseline),
+            word_scale,
+            (255, 255, 255),
+            thickness,
+        )
+        _draw_text(
+            frame,
+            f"{item.certainty:.0%}",
+            (percentage_x, percentage_baseline),
+            percentage_scale,
+            _certainty_color(item.certainty),
+            1,
+        )
+        x += column_width + gap
 
 
 def _fit_text_scale(
@@ -126,16 +164,6 @@ def _fit_text_scale(
     if text_width <= available_width or text_width == 0:
         return preferred
     return max(minimum, preferred * available_width / text_width)
-
-
-def _certainty_caption(
-    caption: str, word_certainties: tuple[WordCertainty, ...]
-) -> str:
-    if not word_certainties:
-        return caption
-    return "  ".join(
-        f"{item.word} {item.certainty:.0%}" for item in word_certainties
-    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -266,7 +294,8 @@ def main(argv: list[str] | None = None) -> int:
             row_height = max(38, (row_area_bottom - row_area_top) // 3)
             now = time.monotonic()
             for row_index in range(3):
-                baseline = row_area_top + row_index * row_height + row_height // 2 + 8
+                row_top = row_area_top + row_index * row_height
+                baseline = row_top + row_height // 2 + 8
                 if row_index >= len(caption_history.entries):
                     _draw_text(
                         display, "—", (22, baseline), 0.55, (105, 105, 105), 1
@@ -283,21 +312,20 @@ def main(argv: list[str] | None = None) -> int:
                             (80, 220, 255),
                         )
                     else:
-                        certainty_text = _certainty_caption(
-                            entry.text, entry.word_certainties
-                        )
-                        scale = _fit_text_scale(certainty_text, width - 44)
                         if entry.word_certainties:
-                            _draw_certainty_line(
+                            _draw_word_certainties(
                                 display,
-                                certainty_text,
-                                (22, baseline),
-                                scale,
+                                entry.word_certainties,
+                                left=22,
+                                word_baseline=row_top + row_height // 2,
+                                percentage_baseline=row_top + row_height - 9,
+                                available_width=width - 44,
                             )
                         else:
+                            scale = _fit_text_scale(entry.text, width - 44)
                             _draw_text(
                                 display,
-                                certainty_text,
+                                entry.text,
                                 (22, baseline),
                                 scale,
                                 (255, 255, 255),

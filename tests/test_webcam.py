@@ -1,7 +1,15 @@
 from __future__ import annotations
 
+import numpy as np
+
+from app import webcam
 from app.model import WordCertainty
-from app.webcam import CaptionHistory, _certainty_color, _processing_placeholder
+from app.webcam import (
+    CaptionHistory,
+    _certainty_color,
+    _draw_word_certainties,
+    _processing_placeholder,
+)
 
 
 def test_certainty_color_runs_from_red_through_yellow_to_green() -> None:
@@ -13,6 +21,34 @@ def test_certainty_color_runs_from_red_through_yellow_to_green() -> None:
 def test_certainty_color_clamps_values_to_probability_range() -> None:
     assert _certainty_color(-1.0) == _certainty_color(0.0)
     assert _certainty_color(2.0) == _certainty_color(1.0)
+
+
+def test_percentage_is_smaller_and_drawn_below_its_word(monkeypatch) -> None:
+    calls: list[tuple[str, tuple[int, int], float, tuple[int, int, int]]] = []
+
+    def record_text(frame, text, origin, scale, color, thickness=2) -> None:
+        calls.append((text, origin, scale, color))
+
+    monkeypatch.setattr(webcam, "_draw_text", record_text)
+    frame = np.zeros((80, 400, 3), dtype=np.uint8)
+    certainty = WordCertainty("HELLO", 0.8, 1)
+
+    _draw_word_certainties(
+        frame,
+        (certainty,),
+        left=10,
+        word_baseline=28,
+        percentage_baseline=55,
+        available_width=380,
+    )
+
+    word_call, percentage_call = calls
+    assert word_call[0] == "HELLO"
+    assert percentage_call[0] == "80%"
+    assert percentage_call[1][1] > word_call[1][1]
+    assert percentage_call[2] < word_call[2]
+    assert word_call[3] == (255, 255, 255)
+    assert percentage_call[3] == _certainty_color(0.8)
 
 
 def test_processing_placeholder_cycles_between_one_and_three_dots() -> None:

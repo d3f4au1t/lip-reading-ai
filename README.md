@@ -145,17 +145,18 @@ uv run --no-sync python app/webcam.py --camera built-in
 uv run --no-sync python app/webcam.py --camera 1  # explicit index, if desired
 ```
 
-Other options include `--window-seconds 6`, `--beam-size 1`, and the advanced
-`--mouth-motion-threshold 0.01` sensitivity control. Frames are kept in memory only and
-are not written to disk. While the face is idle, the UI waits without creating a row or
-asking the decoder for text. Sustained normalized lip movement starts a speech window
-with `.`, `..`, and `...`; a short pause or the maximum window length closes it, and the
-decoded text replaces that placeholder. The newest placeholder is always on the bottom
-row, and every older caption visibly shifts up one row when the next speech window starts.
-The UI keeps the latest three windows on screen. Per-word estimates remain colored from
-red (low), through yellow, to green (high). The UI also shows face/lip
-activity, processing state, last latency, and a warning that model uncertainty is not
-calibrated. Press `Q` or Escape to quit.
+Other options include `--window-seconds 6`, `--beam-size 1`, `--display-width 960`, and
+the advanced `--mouth-motion-threshold 0.01` sensitivity control. Frames are kept in
+memory only and are not written to disk. While the face is idle, the UI waits without
+creating a row or asking the decoder for text. Sustained normalized lip movement starts
+a speech window with `.`, `..`, and `...`; a short pause or the maximum window length
+closes it, and the decoded text replaces that placeholder. The newest placeholder is
+always on the bottom row, and every older caption visibly shifts up one row when the
+next speech window starts.
+The UI keeps the latest three windows in a dedicated panel below the unobstructed camera
+view. Per-word estimates remain colored from red (low), through yellow, to green (high).
+The separate header shows face/lip activity, processing state, last latency, and a
+warning that model uncertainty is not calibrated. Press `Q` or Escape to quit.
 
 Hardware verification selected `FaceTime HD Camera` at index 0 and captured a
 1280×720 frame. The iPhone camera remained available only as the explicit index 1

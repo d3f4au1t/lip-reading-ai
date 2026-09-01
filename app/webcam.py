@@ -176,6 +176,33 @@ def _fit_text_scale(
     return max(minimum, preferred * available_width / text_width)
 
 
+def _build_display_canvas(
+    frame: np.ndarray,
+    display_width: int,
+    header_height: int = 72,
+    caption_panel_height: int = 250,
+) -> tuple[np.ndarray, int, int]:
+    """Place the camera between separate header and caption panels."""
+    if frame.ndim != 3 or frame.shape[2] != 3:
+        raise ValueError("Expected a BGR camera frame shaped [height, width, 3].")
+    if display_width <= 0 or header_height < 0 or caption_panel_height <= 0:
+        raise ValueError("Display dimensions must be positive.")
+    source_height, source_width = frame.shape[:2]
+    camera_height = max(1, round(source_height * display_width / source_width))
+    camera_view = cv2.resize(
+        frame, (display_width, camera_height), interpolation=cv2.INTER_AREA
+    )
+    camera_top = header_height
+    caption_panel_top = camera_top + camera_height
+    display = np.full(
+        (caption_panel_top + caption_panel_height, display_width, 3),
+        15,
+        dtype=np.uint8,
+    )
+    display[camera_top:caption_panel_top] = camera_view
+    return display, camera_top, caption_panel_top
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Short-window visual-only webcam captions")
     parser.add_argument(
@@ -198,6 +225,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=0.01,
         help="Normalized lip-motion threshold used to start recognition",
     )
+    parser.add_argument(
+        "--display-width",
+        type=int,
+        default=960,
+        help="Width of the camera and separate caption panel",
+    )
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT)
     parser.add_argument("--device", choices=("auto", "mps", "cpu", "cuda"), default="auto")
     parser.add_argument("--beam-size", type=int, default=5)
@@ -219,6 +252,8 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError("Window length must be between 1 and 16 seconds.")
     if args.mouth_motion_threshold <= 0:
         raise ValueError("Mouth-motion threshold must be positive.")
+    if args.display_width < 640 or args.display_width > 1920:
+        raise ValueError("Display width must be between 640 and 1920 pixels.")
 
     device = resolve_camera(args.camera)
     print(f"Selected camera {device.index}: {device.name}")
@@ -303,13 +338,10 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 status = "WAITING FOR LIP MOVEMENT"
 
-            display = frame.copy()
+            display, _, panel_top = _build_display_canvas(
+                frame, args.display_width
+            )
             height, width = display.shape[:2]
-            overlay = display.copy()
-            panel_top = max(80, height - 270)
-            cv2.rectangle(overlay, (0, 0), (width, 78), (15, 15, 15), -1)
-            cv2.rectangle(overlay, (0, panel_top), (width, height), (15, 15, 15), -1)
-            display = cv2.addWeighted(overlay, 0.78, display, 0.22, 0)
             face_color = (80, 220, 100) if face_visible else (80, 180, 255)
             _draw_text(display, "ASSISTIVE CAPTIONING PROTOTYPE", (18, 30), 0.65, (255, 255, 255))
             _draw_text(display, status, (18, 62), 0.72, (80, 220, 255))
@@ -329,7 +361,7 @@ def main(argv: list[str] | None = None) -> int:
             if latency is not None:
                 _draw_text(display, f"Last latency: {latency:.1f}s", (max(18, width - 270), 62), 0.5, (220, 220, 220), 1)
 
-            row_area_top = panel_top + 12
+            row_area_top = panel_top + 8
             row_area_bottom = height - 34
             row_height = max(38, (row_area_bottom - row_area_top) // 3)
             now = time.monotonic()

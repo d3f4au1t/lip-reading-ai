@@ -6,10 +6,29 @@ from app import webcam
 from app.model import WordCertainty
 from app.webcam import (
     CaptionHistory,
+    _build_display_canvas,
     _certainty_color,
     _draw_word_certainties,
     _processing_placeholder,
 )
+
+
+def test_camera_and_caption_panel_do_not_overlap() -> None:
+    camera_frame = np.full((90, 160, 3), 220, dtype=np.uint8)
+
+    display, camera_top, caption_panel_top = _build_display_canvas(
+        camera_frame,
+        display_width=320,
+        header_height=20,
+        caption_panel_height=60,
+    )
+
+    assert display.shape == (260, 320, 3)
+    assert camera_top == 20
+    assert caption_panel_top == 200
+    assert np.all(display[:camera_top] == 15)
+    assert np.all(display[camera_top:caption_panel_top] == 220)
+    assert np.all(display[caption_panel_top:] == 15)
 
 
 def test_certainty_color_runs_from_red_through_yellow_to_green() -> None:

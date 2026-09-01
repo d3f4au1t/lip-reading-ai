@@ -4,6 +4,7 @@ import argparse
 import sys
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 
 if __package__ in {None, ""}:
@@ -16,6 +17,58 @@ from app.camera import discover_macos_cameras, open_camera, resolve_camera
 from app.config import DEFAULT_CHECKPOINT, TARGET_FPS
 from app.model import WordCertainty
 from app.pipeline import PipelineResult, VisualSpeechPipeline
+
+
+@dataclass
+class CaptionEntry:
+    entry_id: int
+    started_at: float
+    text: str = ""
+    word_certainties: tuple[WordCertainty, ...] = tuple()
+    pending: bool = True
+
+
+class CaptionHistory:
+    """Keep the three most recent recognition windows in display order."""
+
+    def __init__(self, limit: int = 3) -> None:
+        if limit < 1:
+            raise ValueError("Caption history must contain at least one row.")
+        self.limit = limit
+        self.entries: list[CaptionEntry] = []
+        self._next_entry_id = 0
+
+    def start(self, started_at: float | None = None) -> int:
+        entry_id = self._next_entry_id
+        self._next_entry_id += 1
+        self.entries.append(
+            CaptionEntry(
+                entry_id=entry_id,
+                started_at=time.monotonic() if started_at is None else started_at,
+            )
+        )
+        if len(self.entries) > self.limit:
+            self.entries.pop(0)
+        return entry_id
+
+    def complete(
+        self,
+        entry_id: int,
+        text: str,
+        word_certainties: tuple[WordCertainty, ...] = tuple(),
+    ) -> None:
+        for entry in self.entries:
+            if entry.entry_id == entry_id:
+                entry.text = text
+                entry.word_certainties = word_certainties
+                entry.pending = False
+                return
+        raise KeyError(f"Caption entry {entry_id} is no longer visible.")
+
+
+def _processing_placeholder(started_at: float, now: float) -> str:
+    phase = int(max(0.0, now - started_at) * 2) % 3
+    return "." * (phase + 1)
 
 
 def _draw_text(
@@ -64,20 +117,15 @@ def _draw_certainty_line(
         x += token_width + space_width
 
 
-def _wrap_caption(text: str, max_chars: int = 54, max_lines: int = 4) -> list[str]:
-    words = text.split()
-    lines: list[str] = []
-    current = ""
-    for word in words:
-        candidate = f"{current} {word}".strip()
-        if current and len(candidate) > max_chars:
-            lines.append(current)
-            current = word
-        else:
-            current = candidate
-    if current:
-        lines.append(current)
-    return lines[-max_lines:] or ["Waiting for visible speech..."]
+def _fit_text_scale(
+    text: str, available_width: int, preferred: float = 0.62, minimum: float = 0.3
+) -> float:
+    text_width = cv2.getTextSize(
+        " ".join(text.split()), cv2.FONT_HERSHEY_SIMPLEX, preferred, 2
+    )[0][0]
+    if text_width <= available_width or text_width == 0:
+        return preferred
+    return max(minimum, preferred * available_width / text_width)
 
 
 def _certainty_caption(
@@ -132,10 +180,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="visual-speech")
     future: Future[PipelineResult] | None = None
+    future_entry_id: int | None = None
+    capture_entry_id: int | None = None
     buffered_frames: list[np.ndarray] = []
     target_frames = int(args.window_seconds * TARGET_FPS)
-    caption = "Waiting for visible speech..."
-    word_certainties: tuple[WordCertainty, ...] = tuple()
+    caption_history = CaptionHistory(limit=3)
     status = "CAPTURING"
     face_visible = False
     latency: float | None = None
@@ -153,6 +202,8 @@ def main(argv: list[str] | None = None) -> int:
             frame_number += 1
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             buffered_frames.append(rgb)
+            if capture_entry_id is None:
+                capture_entry_id = caption_history.start()
 
             if frame_number % 5 == 0:
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -160,20 +211,31 @@ def main(argv: list[str] | None = None) -> int:
                 face_visible = len(faces) > 0
 
             if future is not None and future.done():
+                if future_entry_id is None:
+                    raise RuntimeError("A recognition task finished without a caption row.")
                 try:
                     result = future.result()
-                    caption = result.transcription or "[No words decoded — try again]"
-                    word_certainties = result.recognition.word_certainties
+                    caption_history.complete(
+                        future_entry_id,
+                        result.transcription or "[No words decoded — try again]",
+                        result.recognition.word_certainties,
+                    )
                     latency = result.preprocessing_seconds + result.recognition.inference_seconds
                 except Exception as exc:
-                    caption = f"Could not transcribe: {exc}"
-                    word_certainties = tuple()
+                    caption_history.complete(
+                        future_entry_id, f"Could not transcribe: {exc}"
+                    )
                 future = None
+                future_entry_id = None
                 status = "CAPTURING"
 
             if future is None and len(buffered_frames) >= target_frames:
                 segment = buffered_frames[-target_frames:]
                 buffered_frames.clear()
+                if capture_entry_id is None:
+                    raise RuntimeError("A captured window has no caption row.")
+                future_entry_id = capture_entry_id
+                capture_entry_id = None
                 future = executor.submit(pipeline.transcribe_frames, segment)
                 status = "PROCESSING VISUAL SPEECH"
             elif len(buffered_frames) > target_frames * 2:
@@ -182,8 +244,9 @@ def main(argv: list[str] | None = None) -> int:
             display = frame.copy()
             height, width = display.shape[:2]
             overlay = display.copy()
+            panel_top = max(80, height - 270)
             cv2.rectangle(overlay, (0, 0), (width, 78), (15, 15, 15), -1)
-            cv2.rectangle(overlay, (0, max(0, height - 230)), (width, height), (15, 15, 15), -1)
+            cv2.rectangle(overlay, (0, panel_top), (width, height), (15, 15, 15), -1)
             display = cv2.addWeighted(overlay, 0.78, display, 0.22, 0)
             face_color = (80, 220, 100) if face_visible else (80, 180, 255)
             _draw_text(display, "ASSISTIVE CAPTIONING PROTOTYPE", (18, 30), 0.65, (255, 255, 255))
@@ -198,18 +261,58 @@ def main(argv: list[str] | None = None) -> int:
             if latency is not None:
                 _draw_text(display, f"Last latency: {latency:.1f}s", (max(18, width - 270), 62), 0.5, (220, 220, 220), 1)
 
-            certainty_text = _certainty_caption(caption, word_certainties)
-            caption_lines = _wrap_caption(
-                certainty_text, max_chars=max(36, width // 16)
-            )
-            line_height = 38
-            base_y = height - 42 - (len(caption_lines) - 1) * line_height
-            for index, line in enumerate(caption_lines):
-                origin = (22, base_y + index * line_height)
-                if word_certainties:
-                    _draw_certainty_line(display, line, origin, 0.72)
+            row_area_top = panel_top + 12
+            row_area_bottom = height - 34
+            row_height = max(38, (row_area_bottom - row_area_top) // 3)
+            now = time.monotonic()
+            for row_index in range(3):
+                baseline = row_area_top + row_index * row_height + row_height // 2 + 8
+                if row_index >= len(caption_history.entries):
+                    _draw_text(
+                        display, "—", (22, baseline), 0.55, (105, 105, 105), 1
+                    )
                 else:
-                    _draw_text(display, line, origin, 0.9, (255, 255, 255), 2)
+                    entry = caption_history.entries[row_index]
+                    if entry.pending:
+                        placeholder = _processing_placeholder(entry.started_at, now)
+                        _draw_text(
+                            display,
+                            placeholder,
+                            (22, baseline),
+                            0.78,
+                            (80, 220, 255),
+                        )
+                    else:
+                        certainty_text = _certainty_caption(
+                            entry.text, entry.word_certainties
+                        )
+                        scale = _fit_text_scale(certainty_text, width - 44)
+                        if entry.word_certainties:
+                            _draw_certainty_line(
+                                display,
+                                certainty_text,
+                                (22, baseline),
+                                scale,
+                            )
+                        else:
+                            _draw_text(
+                                display,
+                                certainty_text,
+                                (22, baseline),
+                                scale,
+                                (255, 255, 255),
+                                2,
+                            )
+                if row_index < 2:
+                    divider_y = row_area_top + (row_index + 1) * row_height
+                    cv2.line(
+                        display,
+                        (18, divider_y),
+                        (width - 18, divider_y),
+                        (70, 70, 70),
+                        1,
+                        cv2.LINE_AA,
+                    )
             _draw_text(display, "Q: quit", (22, height - 12), 0.42, (180, 180, 180), 1)
             _draw_text(
                 display,

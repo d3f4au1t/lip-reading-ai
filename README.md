@@ -146,9 +146,13 @@ uv run --no-sync python app/webcam.py --camera 1  # explicit index, if desired
 ```
 
 Other options include `--window-seconds 6` and `--beam-size 1`. Frames are kept in
-memory only and are not written to disk. The UI shows face visibility, capture or
-processing state, current caption, last latency, and a visible warning that model
-uncertainty is not calibrated. Press `Q` or Escape to quit.
+memory only and are not written to disk. The UI keeps three recognition windows on
+screen. While a window is being lip-read, its row cycles through `.`, `..`, and `...`;
+the decoded text then replaces that placeholder. Starting a fourth window shifts the
+three existing rows up and opens the bottom row for the new placeholder. Per-word
+estimates remain colored from red (low), through yellow, to green (high). The UI also
+shows face visibility, capture or processing state, last latency, and a warning that
+model uncertainty is not calibrated. Press `Q` or Escape to quit.
 
 Hardware verification selected `FaceTime HD Camera` at index 0 and captured a
 1280×720 frame. The iPhone camera remained available only as the explicit index 1

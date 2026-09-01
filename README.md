@@ -4,7 +4,7 @@ A working local visual speech recognition (VSR) prototype for assistive captioni
 turns visible English speech into text and never uses the input audio stream. It supports:
 
 - a normal video file to predicted text;
-- a webcam UI that captures short in-memory windows and updates large captions;
+- a webcam UI that waits for sustained lip movement before capturing speech;
 - Apple Metal acceleration with a CPU decoder compatibility path;
 - per-word certainty estimates plus latency, real-time factor, CPU, and memory diagnostics.
 
@@ -145,14 +145,16 @@ uv run --no-sync python app/webcam.py --camera built-in
 uv run --no-sync python app/webcam.py --camera 1  # explicit index, if desired
 ```
 
-Other options include `--window-seconds 6` and `--beam-size 1`. Frames are kept in
-memory only and are not written to disk. The UI keeps three recognition windows on
-screen. While a window is being lip-read, its row cycles through `.`, `..`, and `...`;
-the decoded text then replaces that placeholder. Starting a fourth window shifts the
-three existing rows up and opens the bottom row for the new placeholder. Per-word
-estimates remain colored from red (low), through yellow, to green (high). The UI also
-shows face visibility, capture or processing state, last latency, and a warning that
-model uncertainty is not calibrated. Press `Q` or Escape to quit.
+Other options include `--window-seconds 6`, `--beam-size 1`, and the advanced
+`--mouth-motion-threshold 0.01` sensitivity control. Frames are kept in memory only and
+are not written to disk. While the face is idle, the UI waits without creating a row or
+asking the decoder for text. Sustained normalized lip movement starts a speech window
+with `.`, `..`, and `...`; a short pause or the maximum window length closes it, and the
+decoded text replaces that placeholder. The UI keeps three windows on screen. Starting
+a fourth shifts the existing rows up and opens the bottom row. Per-word estimates remain
+colored from red (low), through yellow, to green (high). The UI also shows face/lip
+activity, processing state, last latency, and a warning that model uncertainty is not
+calibrated. Press `Q` or Escape to quit.
 
 Hardware verification selected `FaceTime HD Camera` at index 0 and captured a
 1280×720 frame. The iPhone camera remained available only as the explicit index 1
@@ -164,10 +166,11 @@ override.
 uv run --no-sync pytest
 ```
 
-The suite currently contains four camera-selection tests, two frame-resampling/error
-tests, and one real integration smoke test. The integration test loads the downloaded
-checkpoint, preprocesses the no-audio MP4, executes inference, and requires a non-empty
-transcription. It skips only when the separately downloaded model or sample is absent.
+The suite includes camera selection, speech activity, caption history, word certainty,
+frame processing, and a real integration smoke test. The integration test loads the
+downloaded checkpoint, preprocesses the no-audio MP4, executes inference, and requires
+a non-empty transcription. It skips only when the separately downloaded model or sample
+is absent.
 
 ## Project layout
 
@@ -191,11 +194,12 @@ style, language, distance, and differences from the training data. This checkpoi
 English-only and its relative beam score is **not** a calibrated probability. Do not
 present a prediction as guaranteed truth.
 
-The webcam mode is short-window recognition rather than truly continuous streaming.
-Fixed windows can cut through words, and the 250M-parameter model has a several-second
-cold start. The most useful next improvement is mouth-motion-based utterance boundary
-detection so each window contains complete visible speech before exploring a smaller
-streaming/Core ML model.
+The webcam mode uses mouth-motion endpointing but is not truly continuous streaming.
+Large facial movements, poor landmark tracking, or an unusually subtle speaking style
+can cause a false start or a missed utterance. Long utterances are still divided at the
+configured maximum window length, and the 250M-parameter model has a several-second cold
+start. A dedicated visual voice-activity model and a smaller streaming/Core ML decoder
+would be the next reliability improvements.
 
 ### Per-word certainty
 

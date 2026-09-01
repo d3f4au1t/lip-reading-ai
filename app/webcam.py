@@ -14,6 +14,7 @@ import numpy as np
 
 from app.camera import discover_macos_cameras, open_camera, resolve_camera
 from app.config import DEFAULT_CHECKPOINT, TARGET_FPS
+from app.model import WordCertainty
 from app.pipeline import PipelineResult, VisualSpeechPipeline
 
 
@@ -29,7 +30,7 @@ def _draw_text(
     cv2.putText(frame, text, origin, cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_AA)
 
 
-def _wrap_caption(text: str, max_chars: int = 54) -> list[str]:
+def _wrap_caption(text: str, max_chars: int = 54, max_lines: int = 4) -> list[str]:
     words = text.split()
     lines: list[str] = []
     current = ""
@@ -42,7 +43,17 @@ def _wrap_caption(text: str, max_chars: int = 54) -> list[str]:
             current = candidate
     if current:
         lines.append(current)
-    return lines[-2:] or ["Waiting for visible speech..."]
+    return lines[-max_lines:] or ["Waiting for visible speech..."]
+
+
+def _certainty_caption(
+    caption: str, word_certainties: tuple[WordCertainty, ...]
+) -> str:
+    if not word_certainties:
+        return caption
+    return "  ".join(
+        f"{item.word} {item.certainty:.0%}" for item in word_certainties
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -90,6 +101,7 @@ def main(argv: list[str] | None = None) -> int:
     buffered_frames: list[np.ndarray] = []
     target_frames = int(args.window_seconds * TARGET_FPS)
     caption = "Waiting for visible speech..."
+    word_certainties: tuple[WordCertainty, ...] = tuple()
     status = "CAPTURING"
     face_visible = False
     latency: float | None = None
@@ -117,9 +129,11 @@ def main(argv: list[str] | None = None) -> int:
                 try:
                     result = future.result()
                     caption = result.transcription or "[No words decoded — try again]"
+                    word_certainties = result.recognition.word_certainties
                     latency = result.preprocessing_seconds + result.recognition.inference_seconds
                 except Exception as exc:
                     caption = f"Could not transcribe: {exc}"
+                    word_certainties = tuple()
                 future = None
                 status = "CAPTURING"
 
@@ -135,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
             height, width = display.shape[:2]
             overlay = display.copy()
             cv2.rectangle(overlay, (0, 0), (width, 78), (15, 15, 15), -1)
-            cv2.rectangle(overlay, (0, max(0, height - 150)), (width, height), (15, 15, 15), -1)
+            cv2.rectangle(overlay, (0, max(0, height - 230)), (width, height), (15, 15, 15), -1)
             display = cv2.addWeighted(overlay, 0.78, display, 0.22, 0)
             face_color = (80, 220, 100) if face_visible else (80, 180, 255)
             _draw_text(display, "ASSISTIVE CAPTIONING PROTOTYPE", (18, 30), 0.65, (255, 255, 255))
@@ -150,14 +164,25 @@ def main(argv: list[str] | None = None) -> int:
             if latency is not None:
                 _draw_text(display, f"Last latency: {latency:.1f}s", (max(18, width - 270), 62), 0.5, (220, 220, 220), 1)
 
-            caption_lines = _wrap_caption(caption)
-            base_y = height - 92 if len(caption_lines) == 2 else height - 58
+            certainty_text = _certainty_caption(caption, word_certainties)
+            caption_lines = _wrap_caption(
+                certainty_text, max_chars=max(36, width // 16)
+            )
+            line_height = 38
+            base_y = height - 42 - (len(caption_lines) - 1) * line_height
             for index, line in enumerate(caption_lines):
-                _draw_text(display, line, (22, base_y + index * 45), 0.9, (255, 255, 255), 2)
+                _draw_text(
+                    display,
+                    line,
+                    (22, base_y + index * line_height),
+                    0.72 if word_certainties else 0.9,
+                    (255, 255, 255),
+                    2,
+                )
             _draw_text(display, "Q: quit", (22, height - 12), 0.42, (180, 180, 180), 1)
             _draw_text(
                 display,
-                "UNCERTAINTY: predictions are not calibrated",
+                "WORD CERTAINTY: decoder estimate, not calibrated",
                 (max(18, width - 390), height - 12),
                 0.42,
                 (120, 190, 255),

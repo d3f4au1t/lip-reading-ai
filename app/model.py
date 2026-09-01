@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import sys
 import time
@@ -16,6 +17,13 @@ from app.config import DEFAULT_CHECKPOINT, THIRD_PARTY_ROOT, validate_model_sour
 
 
 @dataclass(frozen=True)
+class WordCertainty:
+    word: str
+    certainty: float
+    token_count: int
+
+
+@dataclass(frozen=True)
 class RecognitionResult:
     text: str
     device: str
@@ -24,11 +32,54 @@ class RecognitionResult:
     video_seconds: float
     real_time_factor: float
     decoding_score_per_token: float | None
+    word_certainties: tuple[WordCertainty, ...]
     average_process_cpu_percent: float
     memory_rss_mb: float
 
-    def to_dict(self) -> dict[str, str | float | None]:
+    def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+def group_word_certainties(
+    token_ids: list[int], token_log_probabilities: list[float], token_list: list[str]
+) -> tuple[WordCertainty, ...]:
+    """Group SentencePiece decoder probabilities into uncalibrated word estimates."""
+    if len(token_ids) != len(token_log_probabilities):
+        raise ValueError("Token IDs and token probabilities must have equal lengths.")
+
+    words: list[WordCertainty] = []
+    current_pieces: list[str] = []
+    current_log_probabilities: list[float] = []
+
+    def finish_word() -> None:
+        if not current_pieces:
+            return
+        word = "".join(current_pieces).replace("▁", "").strip()
+        if word:
+            mean_log_probability = sum(current_log_probabilities) / len(
+                current_log_probabilities
+            )
+            words.append(
+                WordCertainty(
+                    word=word,
+                    certainty=min(1.0, max(0.0, math.exp(mean_log_probability))),
+                    token_count=len(current_log_probabilities),
+                )
+            )
+        current_pieces.clear()
+        current_log_probabilities.clear()
+
+    for token_id, log_probability in zip(token_ids, token_log_probabilities):
+        piece = token_list[token_id]
+        if piece in {"<eos>", "<blank>"}:
+            finish_word()
+            continue
+        if piece.startswith("▁") and current_pieces:
+            finish_word()
+        current_pieces.append(piece)
+        current_log_probabilities.append(log_probability)
+    finish_word()
+    return tuple(words)
 
 
 def choose_device(requested: str = "auto") -> torch.device:
@@ -96,6 +147,7 @@ class AutoAVSRRecognizer:
             self.model.decoder.to(self.decoder_device)
             self.model.ctc.to(self.decoder_device)
         self.text_transform = module.text_transform
+        self.token_list = module.token_list
         self.beam_search = get_beam_search_decoder(
             self.model,
             module.token_list,
@@ -123,14 +175,18 @@ class AutoAVSRRecognizer:
             encoded, _ = self.model.encoder(encoded, None)
             encoded = encoded.squeeze(0).to(self.decoder_device)
             hypotheses = self.beam_search(encoded)
+            if not hypotheses:
+                raise RuntimeError("The decoder returned no transcription hypotheses.")
+            best_hypothesis = hypotheses[0]
+            word_certainties = self._estimate_word_certainties(
+                best_hypothesis.yseq, encoded
+            )
         _synchronize(self.encoder_device)
         inference_seconds = time.perf_counter() - started
         cpu_after = process.cpu_times()
         cpu_seconds = (cpu_after.user + cpu_after.system) - (cpu_before.user + cpu_before.system)
 
-        if not hypotheses:
-            raise RuntimeError("The decoder returned no transcription hypotheses.")
-        best = hypotheses[0].asdict()
+        best = best_hypothesis.asdict()
         token_ids = torch.tensor([int(token) for token in best["yseq"][1:]])
         text = self.text_transform.post_process(token_ids).replace("<eos>", "").strip()
         score = best.get("score")
@@ -152,6 +208,38 @@ class AutoAVSRRecognizer:
             video_seconds=video_seconds,
             real_time_factor=inference_seconds / video_seconds,
             decoding_score_per_token=score_per_token,
+            word_certainties=word_certainties,
             average_process_cpu_percent=100 * cpu_seconds / inference_seconds,
             memory_rss_mb=process.memory_info().rss / (1024 * 1024),
+        )
+
+    def _estimate_word_certainties(
+        self, hypothesis_tokens: torch.Tensor, encoded: torch.Tensor
+    ) -> tuple[WordCertainty, ...]:
+        """Score each decoded word with teacher-forced decoder probabilities.
+
+        The estimate is the geometric mean of the probabilities of the
+        SentencePiece tokens forming a word. It is useful for relative
+        uncertainty display but is not calibrated as correctness probability.
+        """
+        yseq = hypothesis_tokens.to(self.decoder_device, dtype=torch.long)
+        if len(yseq) < 2:
+            return tuple()
+        decoder_input = yseq[:-1].unsqueeze(0)
+        targets = yseq[1:]
+        length = decoder_input.size(1)
+        target_mask = torch.tril(
+            torch.ones(
+                (length, length), device=self.decoder_device, dtype=torch.bool
+            )
+        ).unsqueeze(0)
+        logits, _ = self.model.decoder(
+            decoder_input, target_mask, encoded.unsqueeze(0), None
+        )
+        log_probabilities = torch.log_softmax(logits.squeeze(0), dim=-1)
+        selected = log_probabilities.gather(1, targets.unsqueeze(1)).squeeze(1)
+        return group_word_certainties(
+            [int(token) for token in targets.detach().cpu()],
+            [float(value) for value in selected.detach().cpu()],
+            self.token_list,
         )

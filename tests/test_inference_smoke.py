@@ -25,4 +25,10 @@ def test_visual_only_pipeline_produces_text() -> None:
     assert 0 < result.face_detection_rate <= 1
     assert result.recognition.video_seconds > 0
     assert result.recognition.inference_seconds > 0
-
+    assert len(result.recognition.word_certainties) == len(
+        result.transcription.split()
+    )
+    assert all(
+        0 <= item.certainty <= 1
+        for item in result.recognition.word_certainties
+    )

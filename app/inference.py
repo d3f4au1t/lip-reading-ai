@@ -51,6 +51,15 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  Real-time factor: {recognition.real_time_factor:.2f}x")
     print(f"  Average process CPU: {recognition.average_process_cpu_percent:.0f}%")
     print(f"  Process memory: {recognition.memory_rss_mb:.0f} MB RSS")
+    if recognition.word_certainties:
+        print("\nWord certainty estimates (uncalibrated)")
+        print(
+            "  "
+            + "  ".join(
+                f"{item.word} [{item.certainty:.0%}]"
+                for item in recognition.word_certainties
+            )
+        )
     if recognition.decoding_score_per_token is not None:
         print(
             "  Decoder score/token: "

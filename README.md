@@ -6,7 +6,7 @@ turns visible English speech into text and never uses the input audio stream. It
 - a normal video file to predicted text;
 - a webcam UI that captures short in-memory windows and updates large captions;
 - Apple Metal acceleration with a CPU decoder compatibility path;
-- latency, real-time factor, relative decoder score, CPU, and memory diagnostics.
+- per-word certainty estimates plus latency, real-time factor, CPU, and memory diagnostics.
 
 This is an assistive captioning prototype, not a guarantee of correct transcription.
 
@@ -192,3 +192,12 @@ Fixed windows can cut through words, and the 250M-parameter model has a several-
 cold start. The most useful next improvement is mouth-motion-based utterance boundary
 detection so each window contains complete visible speech before exploring a smaller
 streaming/Core ML model.
+
+### Per-word certainty
+
+Console, JSON, and webcam results include an estimate for every decoded word. Each
+value is the geometric mean of the Transformer decoder probabilities for the
+SentencePiece tokens forming that word. For example, the webcam displays `HELLO 82%`.
+These values are useful for comparing words within a prediction, but they are not
+calibrated probabilities of correctness and can be overconfident because language
+context contributes to the decoder score.

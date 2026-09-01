@@ -1,0 +1,13 @@
+.DS_Store
+.venv/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+models/*.pth
+models/*.pt
+outputs/*
+!outputs/.gitkeep
+samples/*.gif
+samples/*.part
+models/*.part
+

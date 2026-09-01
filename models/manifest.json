@@ -1,0 +1,20 @@
+{
+  "model": "Auto-AVSR visual-only base",
+  "filename": "vsr_trlrs2lrs3vox2avsp_base.pth",
+  "source_repository": "https://github.com/mpc001/auto_avsr",
+  "source_commit": "182b62837773ab01052d4ac21ef1d2203ea7d267",
+  "download_url": "https://drive.google.com/file/d/1r1kx7l9sWnDOCnaFHIGvOtzuhFyFA88_/view",
+  "bytes": 1001892616,
+  "sha256": "fbf7cd70ff1c0e694b3030fb779dbb4570f04e4b841d62f9296c229e94878ddb",
+  "parameters_millions": 250,
+  "reported_lrs3_wer_percent": 20.3,
+  "reported_training_hours": 3291,
+  "training_data_named_by_checkpoint": [
+    "LRS2",
+    "LRS3",
+    "VoxCeleb2",
+    "AVSpeech"
+  ],
+  "code_license": "Apache-2.0",
+  "weights_note": "The upstream project says pretrained models may carry terms derived from their training datasets. Confirm dataset/model rights before commercial use."
+}

@@ -1,0 +1,32 @@
+[project]
+name = "lip-reading-ai"
+version = "0.1.0"
+description = "Local visual-only assistive captioning prototype using Auto-AVSR"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "av==16.0.1",
+  "mediapipe @ https://files.pythonhosted.org/packages/6e/37/bd9a3cc4d9b8af54fe40a4858ddd7397e163e079dd67eccec7a948f598a9/mediapipe-0.10.21-cp311-cp311-macosx_11_0_universal2.whl ; sys_platform == 'darwin' and platform_machine == 'arm64'",
+  "mediapipe==0.10.21 ; sys_platform != 'darwin' or platform_machine != 'arm64'",
+  "numpy==1.26.4",
+  "psutil==7.0.0",
+  "pytorch-lightning==2.5.2",
+  "scikit-image==0.25.2",
+  "sentencepiece==0.2.0",
+  "torch==2.7.1",
+  "torchaudio==2.7.1",
+  "torchvision==0.22.1",
+]
+
+[dependency-groups]
+dev = [
+  "pytest==8.4.1",
+]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+pythonpath = ["."]
+markers = [
+  "integration: requires the downloaded checkpoint and sample video",
+]
+testpaths = ["tests"]

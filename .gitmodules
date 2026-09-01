@@ -1,0 +1,3 @@
+[submodule "third_party/auto_avsr"]
+	path = third_party/auto_avsr
+	url = https://github.com/mpc001/auto_avsr.git

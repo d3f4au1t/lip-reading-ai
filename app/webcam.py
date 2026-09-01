@@ -207,8 +207,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Short-window visual-only webcam captions")
     parser.add_argument(
         "--camera",
-        default="built-in",
-        help="Camera selector: 'built-in' (default) or a numeric index",
+        default="phone",
+        help="Camera selector: 'phone' (default), 'built-in', or a numeric index",
     )
     parser.add_argument(
         "--list-cameras", action="store_true", help="List macOS cameras and exit"
@@ -251,7 +251,12 @@ def main(argv: list[str] | None = None) -> int:
             print("No cameras reported by macOS.")
             return 0
         for device in devices:
-            label = "built-in Mac camera" if device.is_builtin_mac_camera else "external/Continuity"
+            if device.is_phone_camera:
+                label = "iPhone/Continuity camera"
+            elif device.is_builtin_mac_camera:
+                label = "built-in Mac camera"
+            else:
+                label = "external camera"
             print(f"{device.index}: {device.name} ({label})")
         return 0
     if args.window_seconds < 1.0 or args.window_seconds > 16.0:

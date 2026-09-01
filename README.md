@@ -136,11 +136,12 @@ Security → Camera**, then run:
 uv run --no-sync python app/webcam.py
 ```
 
-The default `--camera built-in` selector chooses the Mac's FaceTime camera by name and
-excludes iPhone/Continuity Camera devices. To inspect the mapping or override it:
+The default `--camera phone` selector chooses the iPhone/Continuity camera by name. To
+inspect the mapping or switch back to the Mac's built-in camera:
 
 ```bash
 uv run --no-sync python app/webcam.py --list-cameras
+uv run --no-sync python app/webcam.py --camera phone
 uv run --no-sync python app/webcam.py --camera built-in
 uv run --no-sync python app/webcam.py --camera 1  # explicit index, if desired
 ```
@@ -159,9 +160,8 @@ view. Per-word estimates remain colored from red (low), through yellow, to green
 The separate header shows face/lip activity, processing state, last latency, and a
 warning that model uncertainty is not calibrated. Press `Q` or Escape to quit.
 
-Hardware verification selected `FaceTime HD Camera` at index 0 and captured a
-1280×720 frame. The iPhone camera remained available only as the explicit index 1
-override.
+Hardware verification found `FaceTime HD Camera` and `iPhone Camera`; the named
+selectors avoid depending on their numeric indexes.
 
 ## Tests
 

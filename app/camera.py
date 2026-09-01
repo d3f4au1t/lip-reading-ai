@@ -19,12 +19,17 @@ class CameraDevice:
 
     @property
     def is_builtin_mac_camera(self) -> bool:
-        identity = f"{self.name} {self.model_id}".lower()
+        identity = f"{self.name} {self.model_id} {self.unique_id}".lower()
         excluded = ("iphone", "continuity", "desk view")
         preferred = ("facetime", "built-in", "macbook", "imac")
         return not any(token in identity for token in excluded) and any(
             token in identity for token in preferred
         )
+
+    @property
+    def is_phone_camera(self) -> bool:
+        identity = f"{self.name} {self.model_id} {self.unique_id}".lower()
+        return "iphone" in identity or "continuity" in identity
 
 
 def discover_macos_cameras() -> list[CameraDevice]:
@@ -52,19 +57,42 @@ def discover_macos_cameras() -> list[CameraDevice]:
 
 def resolve_camera(camera: str) -> CameraDevice:
     value = camera.strip().lower()
-    if value not in {"built-in", "builtin", "mac"}:
+    builtin_aliases = {"built-in", "builtin", "mac"}
+    phone_aliases = {"phone", "iphone", "continuity"}
+    if value not in builtin_aliases | phone_aliases:
         try:
             index = int(value)
         except ValueError as exc:
-            raise ValueError("Camera must be 'built-in' or a numeric index such as 0.") from exc
+            raise ValueError(
+                "Camera must be 'phone', 'built-in', or a numeric index such as 0."
+            ) from exc
         if index < 0:
             raise ValueError("Camera index cannot be negative.")
         known = {device.index: device for device in discover_macos_cameras()}
         return known.get(index, CameraDevice(index, f"Camera {index}", "", ""))
 
-    if platform.system() != "Darwin":
+    if value in builtin_aliases and platform.system() != "Darwin":
         return CameraDevice(0, "Default camera", "", "")
+    if value in phone_aliases and platform.system() != "Darwin":
+        raise RuntimeError("The phone camera selector requires macOS Continuity Camera.")
+
     devices = discover_macos_cameras()
+    if value in phone_aliases:
+        phone_cameras = [device for device in devices if device.is_phone_camera]
+        if phone_cameras:
+            return min(
+                phone_cameras,
+                key=lambda device: (
+                    "desk view" in device.name.lower(),
+                    "iphone" not in device.name.lower(),
+                    device.index,
+                ),
+            )
+        names = ", ".join(device.name for device in devices) or "none"
+        raise RuntimeError(
+            "No iPhone/Continuity camera was found. Available cameras: " + names
+        )
+
     for device in devices:
         if device.is_builtin_mac_camera:
             return device
@@ -101,4 +129,3 @@ def open_camera(
         f"{device.name} opened but returned no frames after {warmup_seconds:.0f} seconds. "
         "Close FaceTime/Zoom and check macOS Camera privacy permission."
     )
-

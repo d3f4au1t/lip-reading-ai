@@ -10,7 +10,12 @@ from app.webcam import (
     _certainty_color,
     _draw_word_certainties,
     _processing_placeholder,
+    build_parser,
 )
+
+
+def test_phone_camera_is_the_webcam_default() -> None:
+    assert build_parser().parse_args([]).camera == "phone"
 
 
 def test_camera_and_caption_panel_do_not_overlap() -> None:

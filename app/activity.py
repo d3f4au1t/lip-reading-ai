@@ -50,6 +50,7 @@ class LipMotionObservation:
     face_visible: bool
     motion_score: float
     threshold: float
+    moving: bool
     active: bool
 
 
@@ -77,27 +78,94 @@ def normalized_lip_shape(landmarks: np.ndarray) -> np.ndarray:
     return ((lip_points - center) @ rotation) / mouth_width
 
 
+def accumulated_lip_motion_score(
+    current_shape: np.ndarray, previous_shapes: Sequence[np.ndarray]
+) -> float:
+    """Measure both immediate and slower lip movement across recent frames."""
+    if not previous_shapes:
+        return 0.0
+    distances = [
+        float(np.mean(np.linalg.norm(current_shape - previous, axis=1)))
+        for previous in previous_shapes
+    ]
+    return max(distances[-1], float(np.median(distances)))
+
+
+def adaptive_motion_threshold(minimum: float, noise_floor: float) -> float:
+    """Adapt to camera jitter without allowing the speech threshold to run away."""
+    adaptive = noise_floor * 2.5 + 0.0005
+    return min(minimum * 1.35, max(minimum, adaptive))
+
+
+@dataclass(frozen=True)
+class MotionGateState:
+    threshold: float
+    moving: bool
+    active: bool
+
+
+class MotionActivationGate:
+    """Require repeated motion while ignoring landmark-tracker warm-up jitter."""
+
+    def __init__(
+        self,
+        minimum_score: float,
+        vote_window: int = 6,
+        required_motion_frames: int = 2,
+        warmup_frames: int = 12,
+    ) -> None:
+        if minimum_score <= 0:
+            raise ValueError("The mouth-motion threshold must be positive.")
+        if not 1 <= required_motion_frames <= vote_window:
+            raise ValueError("Required motion frames must fit inside the vote window.")
+        if warmup_frames < 0:
+            raise ValueError("Warm-up frames cannot be negative.")
+        self.minimum_score = minimum_score
+        self.required_motion_frames = required_motion_frames
+        self.warmup_frames = warmup_frames
+        self._recent_motion: deque[bool] = deque(maxlen=vote_window)
+        self._face_frames = 0
+        self._noise_floor = minimum_score / 5
+
+    def update(self, score: float, face_visible: bool) -> MotionGateState:
+        threshold = adaptive_motion_threshold(
+            self.minimum_score, self._noise_floor
+        )
+        if not face_visible:
+            self._recent_motion.clear()
+            self._face_frames = 0
+            return MotionGateState(threshold, False, False)
+
+        self._face_frames += 1
+        if 0 < score < self.minimum_score:
+            self._noise_floor = 0.98 * self._noise_floor + 0.02 * score
+            threshold = adaptive_motion_threshold(
+                self.minimum_score, self._noise_floor
+            )
+        moving = self._face_frames > self.warmup_frames and score >= threshold
+        self._recent_motion.append(moving)
+        active = sum(self._recent_motion) >= self.required_motion_frames
+        return MotionGateState(threshold, moving, active)
+
+
 class LipMotionDetector:
     """Detect sustained lip-shape changes with MediaPipe Face Mesh."""
 
     def __init__(
         self,
-        min_motion_score: float = 0.01,
-        vote_window: int = 5,
+        min_motion_score: float = 0.0055,
+        vote_window: int = 6,
         required_motion_frames: int = 2,
         maximum_input_width: int = 640,
     ) -> None:
-        if min_motion_score <= 0:
-            raise ValueError("The mouth-motion threshold must be positive.")
-        if not 1 <= required_motion_frames <= vote_window:
-            raise ValueError("Required motion frames must fit inside the vote window.")
         self.min_motion_score = min_motion_score
-        self.required_motion_frames = required_motion_frames
         self.maximum_input_width = maximum_input_width
-        self._recent_motion: deque[bool] = deque(maxlen=vote_window)
-        self._previous_shape: np.ndarray | None = None
-        self._face_frames = 0
-        self._noise_floor = min_motion_score / 5
+        self._shape_history: deque[np.ndarray] = deque(maxlen=6)
+        self._activation_gate = MotionActivationGate(
+            minimum_score=min_motion_score,
+            vote_window=vote_window,
+            required_motion_frames=required_motion_frames,
+        )
         self._face_mesh = mp.solutions.face_mesh.FaceMesh(
             static_image_mode=False,
             max_num_faces=1,
@@ -120,12 +188,12 @@ class LipMotionDetector:
             )
 
         result = self._face_mesh.process(frame)
-        threshold = max(self.min_motion_score, self._noise_floor * 4)
         if not result.multi_face_landmarks:
-            self._previous_shape = None
-            self._recent_motion.clear()
-            self._face_frames = 0
-            return LipMotionObservation(False, 0.0, threshold, False)
+            self._shape_history.clear()
+            gate = self._activation_gate.update(0.0, False)
+            return LipMotionObservation(
+                False, 0.0, gate.threshold, gate.moving, gate.active
+            )
 
         frame_height, frame_width = frame.shape[:2]
         landmarks = result.multi_face_landmarks[0].landmark
@@ -137,22 +205,12 @@ class LipMotionDetector:
             dtype=np.float32,
         )
         shape = normalized_lip_shape(points)
-        self._face_frames += 1
-        if self._previous_shape is None:
-            score = 0.0
-        else:
-            score = float(
-                np.mean(np.linalg.norm(shape - self._previous_shape, axis=1))
-            )
-        self._previous_shape = shape
-
-        threshold = max(self.min_motion_score, self._noise_floor * 4)
-        moving = self._face_frames >= 3 and score >= threshold
-        if 0 < score < threshold:
-            self._noise_floor = 0.97 * self._noise_floor + 0.03 * score
-        self._recent_motion.append(moving)
-        active = sum(self._recent_motion) >= self.required_motion_frames
-        return LipMotionObservation(True, score, threshold, active)
+        score = accumulated_lip_motion_score(shape, self._shape_history)
+        self._shape_history.append(shape)
+        gate = self._activation_gate.update(score, True)
+        return LipMotionObservation(
+            True, score, gate.threshold, gate.moving, gate.active
+        )
 
     def close(self) -> None:
         self._face_mesh.close()
@@ -172,7 +230,7 @@ class SpeechWindowCollector:
         fps: float,
         maximum_seconds: float,
         preroll_seconds: float = 0.35,
-        ending_silence_seconds: float = 0.7,
+        ending_silence_seconds: float = 0.45,
         minimum_seconds: float = 0.8,
     ) -> None:
         if fps <= 0 or maximum_seconds <= 0:
@@ -217,4 +275,3 @@ class SpeechWindowCollector:
         self._silent_frames = 0
         self._preroll.extend(completed[-self._preroll.maxlen :])
         return SpeechWindowUpdate(completed_frames=completed)
-

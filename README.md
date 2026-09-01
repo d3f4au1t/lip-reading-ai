@@ -145,8 +145,9 @@ uv run --no-sync python app/webcam.py --camera built-in
 uv run --no-sync python app/webcam.py --camera 1  # explicit index, if desired
 ```
 
-Other options include `--window-seconds 6`, `--beam-size 1`, `--display-width 960`, and
-the advanced `--mouth-motion-threshold 0.01` sensitivity control. Frames are kept in
+Other options include `--window-seconds 6`, `--beam-size 1`, `--display-width 960`,
+`--speech-pause-seconds 0.45`, and the advanced `--mouth-motion-threshold 0.0055`
+sensitivity control. Frames are kept in
 memory only and are not written to disk. While the face is idle, the UI waits without
 creating a row or asking the decoder for text. Sustained normalized lip movement starts
 a speech window with `.`, `..`, and `...`; a short pause or the maximum window length

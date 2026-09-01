@@ -222,8 +222,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--mouth-motion-threshold",
         type=float,
-        default=0.01,
+        default=0.0055,
         help="Normalized lip-motion threshold used to start recognition",
+    )
+    parser.add_argument(
+        "--speech-pause-seconds",
+        type=float,
+        default=0.45,
+        help="Visible pause required before the next caption line",
     )
     parser.add_argument(
         "--display-width",
@@ -252,6 +258,8 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError("Window length must be between 1 and 16 seconds.")
     if args.mouth_motion_threshold <= 0:
         raise ValueError("Mouth-motion threshold must be positive.")
+    if args.speech_pause_seconds < 0.2 or args.speech_pause_seconds > 2.0:
+        raise ValueError("Speech pause must be between 0.2 and 2 seconds.")
     if args.display_width < 640 or args.display_width > 1920:
         raise ValueError("Display width must be between 640 and 1920 pixels.")
 
@@ -267,6 +275,7 @@ def main(argv: list[str] | None = None) -> int:
     speech_collector = SpeechWindowCollector(
         fps=TARGET_FPS,
         maximum_seconds=args.window_seconds,
+        ending_silence_seconds=args.speech_pause_seconds,
     )
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="visual-speech")
     future: Future[PipelineResult] | None = None
@@ -292,7 +301,10 @@ def main(argv: list[str] | None = None) -> int:
             motion = motion_detector.observe(rgb)
             face_visible = motion.face_visible
             lips_moving = motion.active
-            window_update = speech_collector.update(rgb, motion.active)
+            collector_motion = (
+                motion.moving if speech_collector.capturing else motion.active
+            )
+            window_update = speech_collector.update(rgb, collector_motion)
             if window_update.started:
                 if active_entry_id is not None:
                     raise RuntimeError("A new speech window started before the last one ended.")

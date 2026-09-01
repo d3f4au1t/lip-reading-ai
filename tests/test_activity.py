@@ -6,7 +6,10 @@ import numpy as np
 
 from app.activity import (
     LIP_LANDMARK_INDICES,
+    MotionActivationGate,
     SpeechWindowCollector,
+    accumulated_lip_motion_score,
+    adaptive_motion_threshold,
     normalized_lip_shape,
 )
 
@@ -101,3 +104,38 @@ def test_lip_shape_normalization_ignores_translation_scale_and_rotation() -> Non
         atol=1e-5,
     )
 
+
+def test_slow_lip_motion_accumulates_across_recent_frames() -> None:
+    base = np.zeros((len(LIP_LANDMARK_INDICES), 2), dtype=np.float32)
+    history = [base + index * 0.002 for index in range(6)]
+    current = base + 0.012
+
+    immediate_score = float(
+        np.mean(np.linalg.norm(current - history[-1], axis=1))
+    )
+    accumulated_score = accumulated_lip_motion_score(current, history)
+
+    assert immediate_score < 0.006
+    assert accumulated_score > 0.006
+
+
+def test_adaptive_threshold_cannot_become_desensitized() -> None:
+    assert adaptive_motion_threshold(0.006, 0.1) == 0.006 * 1.35
+
+
+def test_motion_gate_ignores_warmup_then_accepts_repeated_motion() -> None:
+    gate = MotionActivationGate(
+        minimum_score=0.0055,
+        vote_window=6,
+        required_motion_frames=2,
+        warmup_frames=4,
+    )
+
+    warmup = [gate.update(0.05, True) for _ in range(4)]
+    first_motion = gate.update(0.007, True)
+    second_motion = gate.update(0.007, True)
+
+    assert not any(state.active for state in warmup)
+    assert first_motion.moving
+    assert not first_motion.active
+    assert second_motion.active

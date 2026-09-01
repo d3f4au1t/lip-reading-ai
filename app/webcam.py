@@ -30,6 +30,40 @@ def _draw_text(
     cv2.putText(frame, text, origin, cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_AA)
 
 
+def _certainty_color(certainty: float) -> tuple[int, int, int]:
+    """Return an OpenCV BGR color from red (0%) through yellow to green (100%)."""
+    certainty = min(1.0, max(0.0, certainty))
+    red = round(255 * min(1.0, 2.0 * (1.0 - certainty)))
+    green = round(255 * min(1.0, 2.0 * certainty))
+    return (0, green, red)
+
+
+def _draw_certainty_line(
+    frame: np.ndarray,
+    text: str,
+    origin: tuple[int, int],
+    scale: float,
+    thickness: int = 2,
+) -> None:
+    """Draw caption words in white and percentage tokens in certainty colors."""
+    x, y = origin
+    space_width = cv2.getTextSize(
+        " ", cv2.FONT_HERSHEY_SIMPLEX, scale, thickness
+    )[0][0]
+    for token in text.split():
+        color = (255, 255, 255)
+        if token.endswith("%"):
+            try:
+                color = _certainty_color(float(token[:-1]) / 100.0)
+            except ValueError:
+                pass
+        _draw_text(frame, token, (x, y), scale, color, thickness)
+        token_width = cv2.getTextSize(
+            token, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness
+        )[0][0]
+        x += token_width + space_width
+
+
 def _wrap_caption(text: str, max_chars: int = 54, max_lines: int = 4) -> list[str]:
     words = text.split()
     lines: list[str] = []
@@ -171,14 +205,11 @@ def main(argv: list[str] | None = None) -> int:
             line_height = 38
             base_y = height - 42 - (len(caption_lines) - 1) * line_height
             for index, line in enumerate(caption_lines):
-                _draw_text(
-                    display,
-                    line,
-                    (22, base_y + index * line_height),
-                    0.72 if word_certainties else 0.9,
-                    (255, 255, 255),
-                    2,
-                )
+                origin = (22, base_y + index * line_height)
+                if word_certainties:
+                    _draw_certainty_line(display, line, origin, 0.72)
+                else:
+                    _draw_text(display, line, origin, 0.9, (255, 255, 255), 2)
             _draw_text(display, "Q: quit", (22, height - 12), 0.42, (180, 180, 180), 1)
             _draw_text(
                 display,

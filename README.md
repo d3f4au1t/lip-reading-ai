@@ -198,6 +198,7 @@ streaming/Core ML model.
 Console, JSON, and webcam results include an estimate for every decoded word. Each
 value is the geometric mean of the Transformer decoder probabilities for the
 SentencePiece tokens forming that word. For example, the webcam displays `HELLO 82%`.
+The webcam colors each percentage from red (low), through yellow, to green (high).
 These values are useful for comparing words within a prediction, but they are not
 calibrated probabilities of correctness and can be overconfident because language
 context contributes to the decoder score.

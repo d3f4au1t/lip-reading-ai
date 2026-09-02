@@ -161,7 +161,9 @@ window starts.
 The UI keeps the latest three windows in a dedicated panel below the unobstructed camera
 view. Per-word estimates remain colored from red (low), through yellow, to green (high).
 The separate header shows face/lip activity, processing state, last latency, and a
-warning that model uncertainty is not calibrated. Press `Q` or Escape to quit.
+warning that model uncertainty is not calibrated. The window can be resized by dragging
+its edges; the full camera and caption layout keeps its aspect ratio. Press `Q` or Escape
+to quit.
 Known MediaPipe graph startup diagnostics are filtered from the terminal, while
 unexpected native errors remain visible. On Apple Silicon, the model's spatial-only
 pooling uses an equivalent Metal-supported 2D operation instead of falling back to CPU.

@@ -8,6 +8,7 @@ from app.webcam import (
     CaptionHistory,
     _build_display_canvas,
     _certainty_color,
+    _create_resizable_window,
     _draw_word_certainties,
     _processing_placeholder,
     build_parser,
@@ -42,6 +43,34 @@ def test_camera_and_caption_panel_do_not_overlap() -> None:
     assert np.all(display[:camera_top] == 15)
     assert np.all(display[camera_top:caption_panel_top] == 220)
     assert np.all(display[caption_panel_top:] == 15)
+
+
+def test_caption_window_is_user_resizable(monkeypatch) -> None:
+    calls: list[tuple[object, ...]] = []
+    monkeypatch.setattr(
+        webcam.cv2,
+        "namedWindow",
+        lambda title, flags: calls.append(("named", title, flags)),
+    )
+    monkeypatch.setattr(
+        webcam.cv2,
+        "resizeWindow",
+        lambda title, width, height: calls.append(
+            ("resize", title, width, height)
+        ),
+    )
+    display = np.zeros((700, 960, 3), dtype=np.uint8)
+
+    _create_resizable_window(display)
+
+    assert calls == [
+        (
+            "named",
+            webcam.WINDOW_TITLE,
+            webcam.cv2.WINDOW_NORMAL | webcam.cv2.WINDOW_KEEPRATIO,
+        ),
+        ("resize", webcam.WINDOW_TITLE, 960, 700),
+    ]
 
 
 def test_certainty_color_runs_from_red_through_yellow_to_green() -> None:

@@ -22,6 +22,9 @@ from app.native_logging import with_filtered_native_diagnostics
 from app.pipeline import PipelineResult, VisualSpeechPipeline
 
 
+WINDOW_TITLE = "Visual-Only Assistive Captions"
+
+
 @dataclass
 class CaptionEntry:
     entry_id: int
@@ -204,6 +207,13 @@ def _build_display_canvas(
     return display, camera_top, caption_panel_top
 
 
+def _create_resizable_window(initial_display: np.ndarray) -> None:
+    """Create a user-resizable window while preserving the rendered layout ratio."""
+    height, width = initial_display.shape[:2]
+    cv2.namedWindow(WINDOW_TITLE, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+    cv2.resizeWindow(WINDOW_TITLE, width, height)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Short-window visual-only webcam captions")
     parser.add_argument(
@@ -309,6 +319,9 @@ def main(argv: list[str] | None = None) -> int:
     face_visible = False
     lips_moving = False
     latency: float | None = None
+
+    initial_display, _, _ = _build_display_canvas(first_frame, args.display_width)
+    _create_resizable_window(initial_display)
 
     try:
         while True:
@@ -462,7 +475,7 @@ def main(argv: list[str] | None = None) -> int:
                 1,
             )
 
-            cv2.imshow("Visual-Only Assistive Captions", display)
+            cv2.imshow(WINDOW_TITLE, display)
             if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
                 break
     finally:

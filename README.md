@@ -147,15 +147,17 @@ uv run --no-sync python app/webcam.py --camera 1  # explicit index, if desired
 ```
 
 Other options include `--window-seconds 12`, `--beam-size 1`, `--display-width 960`,
-`--speech-pause-seconds 1.0`, and the advanced `--mouth-motion-threshold 0.0055`
-sensitivity control. Frames are kept in
+`--minimum-speech-pause-seconds 0.5`, `--speech-pause-seconds 1.0`, and the advanced
+`--mouth-motion-threshold 0.0055` sensitivity control. Frames are kept in
 memory only and are not written to disk. While the face is idle, the UI waits without
 creating a row or asking the decoder for text. Sustained normalized lip movement starts
-a speech window with `.`, `..`, and `...`; a full second of visible silence or the
-12-second maximum window length closes it, and the decoded text replaces that
-placeholder. The newest placeholder is
-always on the bottom row, and every older caption visibly shifts up one row when the
-next speech window starts.
+a speech window with `.`, `..`, and `...`. Endpointing combines elapsed quiet time with
+the live lip-motion score: clearly settled lips close the window after 0.5 seconds,
+while uncertain low movement gets up to 1 second. The 12-second maximum window remains
+a final safety limit. Any renewed lip movement immediately cancels a pending endpoint.
+The decoded text then replaces that placeholder. The newest placeholder is always on
+the bottom row, and every older caption visibly shifts up one row when the next speech
+window starts.
 The UI keeps the latest three windows in a dedicated panel below the unobstructed camera
 view. Per-word estimates remain colored from red (low), through yellow, to green (high).
 The separate header shows face/lip activity, processing state, last latency, and a

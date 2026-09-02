@@ -223,7 +223,7 @@ class SpeechWindowUpdate:
 
 
 class SpeechWindowCollector:
-    """Collect a bounded speech window with preroll and silence endpointing."""
+    """Collect a bounded speech window with preroll and adaptive endpointing."""
 
     def __init__(
         self,
@@ -232,25 +232,45 @@ class SpeechWindowCollector:
         preroll_seconds: float = 0.35,
         ending_silence_seconds: float = 1.0,
         minimum_seconds: float = 0.8,
+        minimum_ending_silence_seconds: float | None = None,
+        settled_silence_seconds: float = 0.2,
     ) -> None:
         if fps <= 0 or maximum_seconds <= 0:
             raise ValueError("Frame rate and maximum window length must be positive.")
         if minimum_seconds > maximum_seconds:
             raise ValueError("Minimum window length cannot exceed the maximum.")
+        if ending_silence_seconds <= 0 or settled_silence_seconds <= 0:
+            raise ValueError("Silence durations must be positive.")
+        if minimum_ending_silence_seconds is None:
+            minimum_ending_silence_seconds = min(0.5, ending_silence_seconds)
+        if minimum_ending_silence_seconds <= 0:
+            raise ValueError("Minimum ending silence must be positive.")
+        if minimum_ending_silence_seconds > ending_silence_seconds:
+            raise ValueError("Minimum ending silence cannot exceed the maximum.")
         self.maximum_frames = max(3, round(fps * maximum_seconds))
         self.minimum_frames = max(3, round(fps * minimum_seconds))
+        self.minimum_ending_silence_frames = max(
+            1, round(fps * minimum_ending_silence_seconds)
+        )
         self.ending_silence_frames = max(1, round(fps * ending_silence_seconds))
+        self.settled_silence_frames = max(1, round(fps * settled_silence_seconds))
         self._preroll: deque[np.ndarray] = deque(
             maxlen=max(1, round(fps * preroll_seconds))
         )
         self._frames: list[np.ndarray] | None = None
         self._silent_frames = 0
+        self._settled_frames = 0
 
     @property
     def capturing(self) -> bool:
         return self._frames is not None
 
-    def update(self, frame: np.ndarray, mouth_active: bool) -> SpeechWindowUpdate:
+    def update(
+        self,
+        frame: np.ndarray,
+        mouth_active: bool,
+        mouth_settled: bool = False,
+    ) -> SpeechWindowUpdate:
         if self._frames is None:
             self._preroll.append(frame)
             if not mouth_active:
@@ -258,14 +278,27 @@ class SpeechWindowCollector:
             self._frames = list(self._preroll)
             self._preroll.clear()
             self._silent_frames = 0
+            self._settled_frames = 0
             return SpeechWindowUpdate(started=True)
 
         self._frames.append(frame)
-        self._silent_frames = 0 if mouth_active else self._silent_frames + 1
+        if mouth_active:
+            self._silent_frames = 0
+            self._settled_frames = 0
+        else:
+            self._silent_frames += 1
+            self._settled_frames = (
+                self._settled_frames + 1 if mouth_settled else 0
+            )
         reached_maximum = len(self._frames) >= self.maximum_frames
+        reached_confident_silence = (
+            self._silent_frames >= self.minimum_ending_silence_frames
+            and self._settled_frames >= self.settled_silence_frames
+        )
+        reached_silence_limit = self._silent_frames >= self.ending_silence_frames
         reached_silence = (
             len(self._frames) >= self.minimum_frames
-            and self._silent_frames >= self.ending_silence_frames
+            and (reached_confident_silence or reached_silence_limit)
         )
         if not reached_maximum and not reached_silence:
             return SpeechWindowUpdate()
@@ -273,5 +306,6 @@ class SpeechWindowCollector:
         completed = tuple(self._frames)
         self._frames = None
         self._silent_frames = 0
+        self._settled_frames = 0
         self._preroll.extend(completed[-self._preroll.maxlen :])
         return SpeechWindowUpdate(completed_frames=completed)

@@ -105,6 +105,48 @@ def test_brief_pause_does_not_split_a_sentence() -> None:
     assert not collector.capturing
 
 
+def test_settled_lips_end_a_sentence_at_the_minimum_pause() -> None:
+    collector = SpeechWindowCollector(
+        fps=10,
+        maximum_seconds=12,
+        preroll_seconds=0.1,
+        ending_silence_seconds=1.0,
+        minimum_ending_silence_seconds=0.5,
+        settled_silence_seconds=0.2,
+        minimum_seconds=0.5,
+    )
+
+    collector.update(_frame(0), True)
+    updates = [
+        collector.update(_frame(index), False, mouth_settled=True)
+        for index in range(1, 6)
+    ]
+
+    assert all(update.completed_frames is None for update in updates[:-1])
+    assert updates[-1].completed_frames is not None
+
+
+def test_uncertain_lip_motion_waits_for_the_maximum_pause() -> None:
+    collector = SpeechWindowCollector(
+        fps=10,
+        maximum_seconds=12,
+        preroll_seconds=0.1,
+        ending_silence_seconds=1.0,
+        minimum_ending_silence_seconds=0.5,
+        settled_silence_seconds=0.2,
+        minimum_seconds=0.5,
+    )
+
+    collector.update(_frame(0), True)
+    updates = [
+        collector.update(_frame(index), False, mouth_settled=False)
+        for index in range(1, 11)
+    ]
+
+    assert all(update.completed_frames is None for update in updates[:-1])
+    assert updates[-1].completed_frames is not None
+
+
 def test_lip_shape_normalization_ignores_translation_scale_and_rotation() -> None:
     landmarks = np.zeros((468, 2), dtype=np.float32)
     angles = np.linspace(0, 2 * math.pi, len(LIP_LANDMARK_INDICES), endpoint=False)

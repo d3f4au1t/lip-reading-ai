@@ -226,10 +226,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Normalized lip-motion threshold used to start recognition",
     )
     parser.add_argument(
+        "--minimum-speech-pause-seconds",
+        type=float,
+        default=0.5,
+        help="Earliest endpoint when the lips have clearly settled",
+    )
+    parser.add_argument(
         "--speech-pause-seconds",
         type=float,
         default=1.0,
-        help="Visible pause required before finalizing the current sentence",
+        help="Longest quiet interval before finalizing the current sentence",
     )
     parser.add_argument(
         "--display-width",
@@ -265,6 +271,14 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError("Mouth-motion threshold must be positive.")
     if args.speech_pause_seconds < 0.2 or args.speech_pause_seconds > 2.0:
         raise ValueError("Speech pause must be between 0.2 and 2 seconds.")
+    if (
+        args.minimum_speech_pause_seconds < 0.2
+        or args.minimum_speech_pause_seconds > args.speech_pause_seconds
+    ):
+        raise ValueError(
+            "Minimum speech pause must be at least 0.2 seconds and cannot exceed "
+            "the maximum speech pause."
+        )
     if args.display_width < 640 or args.display_width > 1920:
         raise ValueError("Display width must be between 640 and 1920 pixels.")
 
@@ -281,6 +295,7 @@ def main(argv: list[str] | None = None) -> int:
         fps=TARGET_FPS,
         maximum_seconds=args.window_seconds,
         ending_silence_seconds=args.speech_pause_seconds,
+        minimum_ending_silence_seconds=args.minimum_speech_pause_seconds,
     )
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="visual-speech")
     future: Future[PipelineResult] | None = None
@@ -306,7 +321,16 @@ def main(argv: list[str] | None = None) -> int:
             motion = motion_detector.observe(rgb)
             face_visible = motion.face_visible
             lips_moving = motion.active
-            window_update = speech_collector.update(rgb, motion.active)
+            mouth_settled = (
+                motion.face_visible
+                and motion.motion_score <= motion.threshold * 0.35
+            )
+            collector_active = motion.active or (
+                speech_collector.capturing and motion.moving
+            )
+            window_update = speech_collector.update(
+                rgb, collector_active, mouth_settled
+            )
             if window_update.started:
                 if active_entry_id is not None:
                     raise RuntimeError("A new speech window started before the last one ended.")

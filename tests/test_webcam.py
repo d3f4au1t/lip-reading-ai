@@ -22,6 +22,7 @@ def test_webcam_defaults_keep_complete_sentences_together() -> None:
     args = build_parser().parse_args([])
 
     assert args.window_seconds == 12.0
+    assert args.minimum_speech_pause_seconds == 0.5
     assert args.speech_pause_seconds == 1.0
 
 

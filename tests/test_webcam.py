@@ -18,6 +18,13 @@ def test_phone_camera_is_the_webcam_default() -> None:
     assert build_parser().parse_args([]).camera == "phone"
 
 
+def test_webcam_defaults_keep_complete_sentences_together() -> None:
+    args = build_parser().parse_args([])
+
+    assert args.window_seconds == 12.0
+    assert args.speech_pause_seconds == 1.0
+
+
 def test_camera_and_caption_panel_do_not_overlap() -> None:
     camera_frame = np.full((90, 160, 3), 220, dtype=np.uint8)
 

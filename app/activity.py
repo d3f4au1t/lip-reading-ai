@@ -230,7 +230,7 @@ class SpeechWindowCollector:
         fps: float,
         maximum_seconds: float,
         preroll_seconds: float = 0.35,
-        ending_silence_seconds: float = 0.45,
+        ending_silence_seconds: float = 1.0,
         minimum_seconds: float = 0.8,
     ) -> None:
         if fps <= 0 or maximum_seconds <= 0:

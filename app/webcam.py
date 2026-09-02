@@ -216,7 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--window-seconds",
         type=float,
-        default=4.0,
+        default=12.0,
         help="Maximum seconds per detected visible-speech window",
     )
     parser.add_argument(
@@ -228,8 +228,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--speech-pause-seconds",
         type=float,
-        default=0.45,
-        help="Visible pause required before the next caption line",
+        default=1.0,
+        help="Visible pause required before finalizing the current sentence",
     )
     parser.add_argument(
         "--display-width",
@@ -306,10 +306,7 @@ def main(argv: list[str] | None = None) -> int:
             motion = motion_detector.observe(rgb)
             face_visible = motion.face_visible
             lips_moving = motion.active
-            collector_motion = (
-                motion.moving if speech_collector.capturing else motion.active
-            )
-            window_update = speech_collector.update(rgb, collector_motion)
+            window_update = speech_collector.update(rgb, motion.active)
             if window_update.started:
                 if active_entry_id is not None:
                     raise RuntimeError("A new speech window started before the last one ended.")

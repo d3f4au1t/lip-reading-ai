@@ -83,6 +83,28 @@ def test_speech_window_stops_at_maximum_length() -> None:
     assert len(completed) == 10
 
 
+def test_brief_pause_does_not_split_a_sentence() -> None:
+    collector = SpeechWindowCollector(
+        fps=10,
+        maximum_seconds=12,
+        preroll_seconds=0.1,
+        minimum_seconds=0.5,
+    )
+
+    collector.update(_frame(0), True)
+    brief_pause = [collector.update(_frame(index), False) for index in range(1, 6)]
+    resumed = collector.update(_frame(6), True)
+    ending_pause = [
+        collector.update(_frame(index), False) for index in range(7, 17)
+    ]
+
+    assert not any(update.completed_frames is not None for update in brief_pause)
+    assert resumed.completed_frames is None
+    assert all(update.completed_frames is None for update in ending_pause[:-1])
+    assert ending_pause[-1].completed_frames is not None
+    assert not collector.capturing
+
+
 def test_lip_shape_normalization_ignores_translation_scale_and_rotation() -> None:
     landmarks = np.zeros((468, 2), dtype=np.float32)
     angles = np.linspace(0, 2 * math.pi, len(LIP_LANDMARK_INDICES), endpoint=False)

@@ -12,6 +12,7 @@ os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 import psutil
 import torch
+import torch.nn.functional as F
 
 from app.config import DEFAULT_CHECKPOINT, THIRD_PARTY_ROOT, validate_model_source
 
@@ -106,6 +107,47 @@ def _synchronize(device: torch.device) -> None:
         torch.cuda.synchronize(device)
 
 
+class MpsSpatialMaxPool(torch.nn.Module):
+    """Apply the model's spatial-only 3D pool through MPS-supported 2D pooling."""
+
+    def forward(self, video: torch.Tensor) -> torch.Tensor:
+        if video.ndim != 5:
+            raise ValueError("Expected video features shaped [B, C, T, H, W].")
+        batch, channels, frames, height, width = video.shape
+        spatial_frames = video.permute(0, 2, 1, 3, 4).reshape(
+            batch * frames, channels, height, width
+        )
+        pooled = F.max_pool2d(
+            spatial_frames,
+            kernel_size=(3, 3),
+            stride=(2, 2),
+            padding=(1, 1),
+        )
+        pooled_height, pooled_width = pooled.shape[-2:]
+        return (
+            pooled.reshape(batch, frames, channels, pooled_height, pooled_width)
+            .permute(0, 2, 1, 3, 4)
+            .contiguous()
+        )
+
+
+def _replace_mps_unsupported_pool(model: torch.nn.Module) -> None:
+    pool = model.frontend.frontend3D[-1]
+    if not isinstance(pool, torch.nn.MaxPool3d):
+        raise RuntimeError(
+            "The pinned Auto-AVSR pooling layer changed; refusing an unsafe MPS "
+            "substitution."
+        )
+    expected = ((1, 3, 3), (1, 2, 2), (0, 1, 1))
+    actual = (pool.kernel_size, pool.stride, pool.padding)
+    if actual != expected:
+        raise RuntimeError(
+            "The pinned Auto-AVSR spatial pooling layer changed; refusing an unsafe "
+            "MPS substitution."
+        )
+    model.frontend.frontend3D[-1] = MpsSpatialMaxPool()
+
+
 class AutoAVSRRecognizer:
     """Thin inference wrapper around the pinned official Auto-AVSR model."""
 
@@ -142,6 +184,8 @@ class AutoAVSRRecognizer:
         module = ModelModule(args)
         state_dict = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
         module.model.load_state_dict(state_dict, strict=True)
+        if self.encoder_device.type == "mps":
+            _replace_mps_unsupported_pool(module.model)
         self.model = module.model.to(self.encoder_device).eval()
         if self.decoder_device != self.encoder_device:
             self.model.decoder.to(self.decoder_device)

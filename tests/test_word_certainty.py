@@ -3,8 +3,10 @@ from __future__ import annotations
 import math
 
 import pytest
+import torch
+import torch.nn.functional as F
 
-from app.model import group_word_certainties
+from app.model import MpsSpatialMaxPool, group_word_certainties
 
 
 def test_sentencepiece_tokens_are_grouped_by_word() -> None:
@@ -24,3 +26,16 @@ def test_grouping_rejects_mismatched_lengths() -> None:
     with pytest.raises(ValueError, match="equal lengths"):
         group_word_certainties([1], [], ["<blank>", "▁WORD"])
 
+
+def test_mps_spatial_pool_matches_the_original_model_pool() -> None:
+    video = torch.randn(2, 4, 5, 12, 14)
+
+    expected = F.max_pool3d(
+        video,
+        kernel_size=(1, 3, 3),
+        stride=(1, 2, 2),
+        padding=(0, 1, 1),
+    )
+    actual = MpsSpatialMaxPool()(video)
+
+    assert torch.equal(actual, expected)

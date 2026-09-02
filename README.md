@@ -162,6 +162,9 @@ The UI keeps the latest three windows in a dedicated panel below the unobstructe
 view. Per-word estimates remain colored from red (low), through yellow, to green (high).
 The separate header shows face/lip activity, processing state, last latency, and a
 warning that model uncertainty is not calibrated. Press `Q` or Escape to quit.
+Known MediaPipe graph startup diagnostics are filtered from the terminal, while
+unexpected native errors remain visible. On Apple Silicon, the model's spatial-only
+pooling uses an equivalent Metal-supported 2D operation instead of falling back to CPU.
 
 Hardware verification found `FaceTime HD Camera` and `iPhone Camera`; the named
 selectors avoid depending on their numeric indexes.

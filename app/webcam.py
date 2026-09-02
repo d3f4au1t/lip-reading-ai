@@ -18,6 +18,7 @@ from app.activity import LipMotionDetector, SpeechWindowCollector
 from app.camera import discover_macos_cameras, open_camera, resolve_camera
 from app.config import DEFAULT_CHECKPOINT, TARGET_FPS
 from app.model import WordCertainty
+from app.native_logging import with_filtered_native_diagnostics
 from app.pipeline import PipelineResult, VisualSpeechPipeline
 
 
@@ -249,6 +250,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+@with_filtered_native_diagnostics
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.list_cameras:

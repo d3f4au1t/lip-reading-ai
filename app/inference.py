@@ -9,6 +9,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import DEFAULT_CHECKPOINT
+from app.native_logging import with_filtered_native_diagnostics
 from app.pipeline import VisualSpeechPipeline
 
 
@@ -30,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+@with_filtered_native_diagnostics
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     pipeline = VisualSpeechPipeline(args.checkpoint, args.device, args.beam_size)

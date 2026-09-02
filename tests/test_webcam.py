@@ -7,6 +7,7 @@ from app.model import WordCertainty
 from app.webcam import (
     CaptionHistory,
     _build_display_canvas,
+    _caption_has_enough_support,
     _certainty_color,
     _create_resizable_window,
     _draw_word_certainties,
@@ -175,3 +176,26 @@ def test_caption_result_replaces_its_placeholder() -> None:
     assert history.entries[0].text == "HELLO"
     assert history.entries[0].word_certainties == certainties
     assert history.entries[0].pending is False
+
+
+def test_caption_history_can_remove_a_rejected_placeholder() -> None:
+    history = CaptionHistory(limit=3)
+    entry_id = history.start(started_at=1.0)
+
+    assert history.discard(entry_id)
+    assert history.entries == []
+
+
+def test_weak_visual_and_decoder_evidence_rejects_default_phrases() -> None:
+    certainties = (
+        WordCertainty("AND", 0.52, 1),
+        WordCertainty("VIDEO", 0.56, 1),
+    )
+
+    assert not _caption_has_enough_support(0.2, -1.42, certainties)
+
+
+def test_strong_visual_evidence_keeps_uncertain_real_speech() -> None:
+    certainties = (WordCertainty("WORD", 0.3, 1),)
+
+    assert _caption_has_enough_support(0.8, -1.5, certainties)

@@ -74,6 +74,13 @@ class CaptionHistory:
     def contains(self, entry_id: int) -> bool:
         return any(entry.entry_id == entry_id for entry in self.entries)
 
+    def discard(self, entry_id: int) -> bool:
+        for index, entry in enumerate(self.entries):
+            if entry.entry_id == entry_id:
+                self.entries.pop(index)
+                return True
+        return False
+
     def display_rows(self) -> tuple[CaptionEntry | None, ...]:
         """Bottom-align entries so each new caption visibly shifts older rows up."""
         empty_rows = (None,) * (self.limit - len(self.entries))
@@ -83,6 +90,24 @@ class CaptionHistory:
 def _processing_placeholder(started_at: float, now: float) -> str:
     phase = int(max(0.0, now - started_at) * 2) % 3
     return "." * (phase + 1)
+
+
+def _caption_has_enough_support(
+    motion_fraction: float,
+    decoding_score_per_token: float | None,
+    word_certainties: tuple[WordCertainty, ...],
+) -> bool:
+    """Reject language-prior text when visual and decoder evidence are both weak."""
+    if motion_fraction >= 0.3:
+        return True
+    if motion_fraction < 0.15 or decoding_score_per_token is None:
+        return False
+    if not word_certainties or decoding_score_per_token < -1.0:
+        return False
+    average_certainty = sum(item.certainty for item in word_certainties) / len(
+        word_certainties
+    )
+    return average_certainty >= 0.55
 
 
 def _draw_text(
@@ -312,8 +337,9 @@ def main(argv: list[str] | None = None) -> int:
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="visual-speech")
     future: Future[PipelineResult] | None = None
     future_entry_id: int | None = None
+    future_motion_fraction = 0.0
     active_entry_id: int | None = None
-    ready_segments: deque[tuple[int, tuple[np.ndarray, ...]]] = deque()
+    ready_segments: deque[tuple[int, tuple[np.ndarray, ...], float]] = deque()
     caption_history = CaptionHistory(limit=3)
     status = "WAITING FOR LIP MOVEMENT"
     face_visible = False
@@ -344,7 +370,10 @@ def main(argv: list[str] | None = None) -> int:
                 speech_collector.capturing and motion.moving
             )
             window_update = speech_collector.update(
-                rgb, collector_active, mouth_settled
+                rgb,
+                collector_active,
+                mouth_settled,
+                mouth_moving=motion.moving,
             )
             if window_update.started:
                 if active_entry_id is not None:
@@ -354,8 +383,17 @@ def main(argv: list[str] | None = None) -> int:
                 if active_entry_id is None:
                     raise RuntimeError("A speech window ended without a caption row.")
                 ready_segments.append(
-                    (active_entry_id, window_update.completed_frames)
+                    (
+                        active_entry_id,
+                        window_update.completed_frames,
+                        window_update.motion_fraction,
+                    )
                 )
+                active_entry_id = None
+            elif window_update.discarded:
+                if active_entry_id is None:
+                    raise RuntimeError("A rejected speech window had no caption row.")
+                caption_history.discard(active_entry_id)
                 active_entry_id = None
 
             if future is not None and future.done():
@@ -363,11 +401,18 @@ def main(argv: list[str] | None = None) -> int:
                     raise RuntimeError("A recognition task finished without a caption row.")
                 try:
                     result = future.result()
-                    caption_history.complete(
-                        future_entry_id,
-                        result.transcription or "[No words decoded — try again]",
+                    if _caption_has_enough_support(
+                        future_motion_fraction,
+                        result.recognition.decoding_score_per_token,
                         result.recognition.word_certainties,
-                    )
+                    ):
+                        caption_history.complete(
+                            future_entry_id,
+                            result.transcription or "[No words decoded — try again]",
+                            result.recognition.word_certainties,
+                        )
+                    else:
+                        caption_history.discard(future_entry_id)
                     latency = result.preprocessing_seconds + result.recognition.inference_seconds
                 except Exception as exc:
                     caption_history.complete(
@@ -375,11 +420,14 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 future = None
                 future_entry_id = None
+                future_motion_fraction = 0.0
 
             while ready_segments and not caption_history.contains(ready_segments[0][0]):
                 ready_segments.popleft()
             if future is None and ready_segments:
-                future_entry_id, segment = ready_segments.popleft()
+                future_entry_id, segment, future_motion_fraction = (
+                    ready_segments.popleft()
+                )
                 future = executor.submit(pipeline.transcribe_frames, segment)
 
             if speech_collector.capturing and future is not None:

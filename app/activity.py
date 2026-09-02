@@ -220,6 +220,8 @@ class LipMotionDetector:
 class SpeechWindowUpdate:
     started: bool = False
     completed_frames: tuple[np.ndarray, ...] | None = None
+    discarded: bool = False
+    motion_fraction: float = 0.0
 
 
 class SpeechWindowCollector:
@@ -234,6 +236,8 @@ class SpeechWindowCollector:
         minimum_seconds: float = 0.8,
         minimum_ending_silence_seconds: float | None = None,
         settled_silence_seconds: float = 0.2,
+        minimum_motion_seconds: float = 0.2,
+        minimum_motion_fraction: float = 0.15,
     ) -> None:
         if fps <= 0 or maximum_seconds <= 0:
             raise ValueError("Frame rate and maximum window length must be positive.")
@@ -247,6 +251,10 @@ class SpeechWindowCollector:
             raise ValueError("Minimum ending silence must be positive.")
         if minimum_ending_silence_seconds > ending_silence_seconds:
             raise ValueError("Minimum ending silence cannot exceed the maximum.")
+        if minimum_motion_seconds <= 0:
+            raise ValueError("Minimum motion duration must be positive.")
+        if not 0 < minimum_motion_fraction <= 1:
+            raise ValueError("Minimum motion fraction must be between zero and one.")
         self.maximum_frames = max(3, round(fps * maximum_seconds))
         self.minimum_frames = max(3, round(fps * minimum_seconds))
         self.minimum_ending_silence_frames = max(
@@ -254,10 +262,13 @@ class SpeechWindowCollector:
         )
         self.ending_silence_frames = max(1, round(fps * ending_silence_seconds))
         self.settled_silence_frames = max(1, round(fps * settled_silence_seconds))
-        self._preroll: deque[np.ndarray] = deque(
-            maxlen=max(1, round(fps * preroll_seconds))
-        )
+        self.minimum_motion_frames = max(1, round(fps * minimum_motion_seconds))
+        self.minimum_motion_fraction = minimum_motion_fraction
+        preroll_frames = max(1, round(fps * preroll_seconds))
+        self._preroll: deque[np.ndarray] = deque(maxlen=preroll_frames)
+        self._motion_preroll: deque[bool] = deque(maxlen=preroll_frames)
         self._frames: list[np.ndarray] | None = None
+        self._motion_flags: list[bool] | None = None
         self._silent_frames = 0
         self._settled_frames = 0
 
@@ -270,18 +281,28 @@ class SpeechWindowCollector:
         frame: np.ndarray,
         mouth_active: bool,
         mouth_settled: bool = False,
+        mouth_moving: bool | None = None,
     ) -> SpeechWindowUpdate:
+        moving = mouth_active if mouth_moving is None else mouth_moving
         if self._frames is None:
             self._preroll.append(frame)
+            self._motion_preroll.append(moving)
             if not mouth_active:
                 return SpeechWindowUpdate()
             self._frames = list(self._preroll)
+            self._motion_flags = list(self._motion_preroll)
             self._preroll.clear()
+            self._motion_preroll.clear()
             self._silent_frames = 0
             self._settled_frames = 0
             return SpeechWindowUpdate(started=True)
 
         self._frames.append(frame)
+        if self._motion_flags is None:
+            raise RuntimeError(
+                "Motion evidence was not initialized for the speech window."
+            )
+        self._motion_flags.append(moving)
         if mouth_active:
             self._silent_frames = 0
             self._settled_frames = 0
@@ -304,8 +325,25 @@ class SpeechWindowCollector:
             return SpeechWindowUpdate()
 
         completed = tuple(self._frames)
+        motion_flags = tuple(self._motion_flags)
+        motion_frames = sum(motion_flags)
+        motion_fraction = motion_frames / len(motion_flags)
         self._frames = None
+        self._motion_flags = None
         self._silent_frames = 0
         self._settled_frames = 0
         self._preroll.extend(completed[-self._preroll.maxlen :])
-        return SpeechWindowUpdate(completed_frames=completed)
+        self._motion_preroll.extend(motion_flags[-self._motion_preroll.maxlen :])
+        enough_motion = (
+            motion_frames >= self.minimum_motion_frames
+            and motion_fraction >= self.minimum_motion_fraction
+        )
+        if not enough_motion:
+            return SpeechWindowUpdate(
+                discarded=True,
+                motion_fraction=motion_fraction,
+            )
+        return SpeechWindowUpdate(
+            completed_frames=completed,
+            motion_fraction=motion_fraction,
+        )

@@ -158,6 +158,10 @@ a final safety limit. Any renewed lip movement immediately cancels a pending end
 The decoded text then replaces that placeholder. The newest placeholder is always on
 the bottom row, and every older caption visibly shifts up one row when the next speech
 window starts.
+Before decoding, the app rejects windows without at least 0.2 seconds of measured lip
+motion and a meaningful motion fraction. Marginal-motion windows are displayed only
+when the decoder evidence is also strong. This suppresses generic language-model phrases
+that can otherwise appear when no one is speaking without blacklisting specific text.
 The UI keeps the latest three windows in a dedicated panel below the unobstructed camera
 view. Per-word estimates remain colored from red (low), through yellow, to green (high).
 The separate header shows face/lip activity, processing state, last latency, and a

@@ -92,14 +92,16 @@ def test_brief_pause_does_not_split_a_sentence() -> None:
     )
 
     collector.update(_frame(0), True)
-    brief_pause = [collector.update(_frame(index), False) for index in range(1, 6)]
-    resumed = collector.update(_frame(6), True)
+    collector.update(_frame(1), True)
+    collector.update(_frame(2), True)
+    brief_pause = [collector.update(_frame(index), False) for index in range(3, 8)]
+    resumed = [collector.update(_frame(index), True) for index in range(8, 11)]
     ending_pause = [
-        collector.update(_frame(index), False) for index in range(7, 17)
+        collector.update(_frame(index), False) for index in range(11, 21)
     ]
 
     assert not any(update.completed_frames is not None for update in brief_pause)
-    assert resumed.completed_frames is None
+    assert not any(update.completed_frames is not None for update in resumed)
     assert all(update.completed_frames is None for update in ending_pause[:-1])
     assert ending_pause[-1].completed_frames is not None
     assert not collector.capturing
@@ -117,9 +119,10 @@ def test_settled_lips_end_a_sentence_at_the_minimum_pause() -> None:
     )
 
     collector.update(_frame(0), True)
+    collector.update(_frame(1), True)
     updates = [
         collector.update(_frame(index), False, mouth_settled=True)
-        for index in range(1, 6)
+        for index in range(2, 7)
     ]
 
     assert all(update.completed_frames is None for update in updates[:-1])
@@ -138,13 +141,35 @@ def test_uncertain_lip_motion_waits_for_the_maximum_pause() -> None:
     )
 
     collector.update(_frame(0), True)
+    collector.update(_frame(1), True)
     updates = [
         collector.update(_frame(index), False, mouth_settled=False)
-        for index in range(1, 11)
+        for index in range(2, 12)
     ]
 
     assert all(update.completed_frames is None for update in updates[:-1])
     assert updates[-1].completed_frames is not None
+
+
+def test_weak_motion_window_is_discarded_before_recognition() -> None:
+    collector = SpeechWindowCollector(
+        fps=10,
+        maximum_seconds=2,
+        preroll_seconds=0.1,
+        ending_silence_seconds=0.3,
+        minimum_seconds=0.5,
+        minimum_motion_seconds=0.3,
+    )
+
+    collector.update(_frame(0), True)
+    collector.update(_frame(1), True)
+    collector.update(_frame(2), False)
+    collector.update(_frame(3), False)
+    rejected = collector.update(_frame(4), False)
+
+    assert rejected.discarded
+    assert rejected.completed_frames is None
+    assert rejected.motion_fraction == 2 / 5
 
 
 def test_lip_shape_normalization_ignores_translation_scale_and_rotation() -> None:
